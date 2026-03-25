@@ -241,7 +241,10 @@ Tests de stress, d'humeur et de personnalité pour mieux vous connaître et rass
                 <li>✓ Tests de personnalite & comportement</li>
                 <li>✓ Planification des entretiens</li>
               </ul>
-              <button className='inline-flex items-center justify-center rounded-full bg-gradient-to-r from-[#08c2d9] via-[#07afc8] to-[#1a74b0] px-7 py-2.5 text-white font-semibold shadow-[0_10px_24px_rgba(8,163,196,0.28)] hover:-translate-y-0.5 hover:shadow-[0_14px_30px_rgba(8,163,196,0.36)] transition-all duration-300'>
+              <button
+                onClick={() => navigate('/connecter')}
+                className='inline-flex items-center justify-center rounded-full bg-gradient-to-r from-[#08c2d9] via-[#07afc8] to-[#1a74b0] px-7 py-2.5 text-white font-semibold shadow-[0_10px_24px_rgba(8,163,196,0.28)] hover:-translate-y-0.5 hover:shadow-[0_14px_30px_rgba(8,163,196,0.36)] transition-all duration-300'
+              >
                 Creer mon profil candidat
               </button>
             </article>

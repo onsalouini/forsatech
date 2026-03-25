@@ -28,7 +28,10 @@ function Navbar() {
 
   return (
     <>
-      <nav className='relative flex items-center py-0 bg-[#001d3e]' style={{ fontFamily: "'Jost', sans-serif" }}>
+      <nav
+        className='relative w-full flex items-center py-0 bg-[#001d3e] px-4 sm:px-[5vw] md:px-[7vw] lg:px-[9vw]'
+        style={{ fontFamily: "'Jost', sans-serif" }}
+      >
         <button
           type='button'
           onClick={() => navigate('/')}

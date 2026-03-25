@@ -18,6 +18,9 @@ pnpm-debug.log*
 frontend/dist/
 coverage/
 
+# Uploads
+backend/uploads/
+
 # OS/editor
 .DS_Store
 Thumbs.db
