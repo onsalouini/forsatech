@@ -1,0 +1,106 @@
+{
+  "lang":"en",
+  "name":"pipeline",
+  "version":"0.0.0",
+  "spacy_version":">=3.8.11,<3.9.0",
+  "description":"",
+  "author":"",
+  "email":"",
+  "url":"",
+  "license":"",
+  "spacy_git_version":"e7a662a",
+  "vectors":{
+    "width":0,
+    "vectors":0,
+    "keys":0,
+    "name":null,
+    "mode":"default"
+  },
+  "labels":{
+    "transformer":[
+
+    ],
+    "ner":[
+      "College Name",
+      "Companies worked at",
+      "Degree",
+      "Designation",
+      "Email Address",
+      "Graduation Year",
+      "Location",
+      "Name",
+      "Skills",
+      "Years of Experience"
+    ]
+  },
+  "pipeline":[
+    "transformer",
+    "ner"
+  ],
+  "components":[
+    "transformer",
+    "ner"
+  ],
+  "disabled":[
+
+  ],
+  "performance":{
+    "ents_f":0.8155061019,
+    "ents_p":0.7899860918,
+    "ents_r":0.8427299703,
+    "ents_per_type":{
+      "Name":{
+        "p":0.9666666667,
+        "r":0.9666666667,
+        "f":0.9666666667
+      },
+      "Email Address":{
+        "p":0.8620689655,
+        "r":0.9259259259,
+        "f":0.8928571429
+      },
+      "Location":{
+        "p":0.75,
+        "r":0.9310344828,
+        "f":0.8307692308
+      },
+      "Designation":{
+        "p":0.7391304348,
+        "r":0.8095238095,
+        "f":0.7727272727
+      },
+      "Years of Experience":{
+        "p":0.95,
+        "r":0.8636363636,
+        "f":0.9047619048
+      },
+      "Skills":{
+        "p":0.7512690355,
+        "r":0.896969697,
+        "f":0.817679558
+      },
+      "Companies worked at":{
+        "p":0.8095238095,
+        "r":0.5795454545,
+        "f":0.6754966887
+      },
+      "Degree":{
+        "p":0.8,
+        "r":0.7567567568,
+        "f":0.7777777778
+      },
+      "College Name":{
+        "p":0.8947368421,
+        "r":0.9189189189,
+        "f":0.9066666667
+      },
+      "Graduation Year":{
+        "p":0.8928571429,
+        "r":0.78125,
+        "f":0.8333333333
+      }
+    },
+    "transformer_loss":4209.6598914397,
+    "ner_loss":1073.2208251953
+  }
+}

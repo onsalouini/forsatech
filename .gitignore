@@ -25,3 +25,11 @@ backend/uploads/
 .DS_Store
 Thumbs.db
 .vscode/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+analyse-cv/.venv/
+analyse-cv/__pycache__/

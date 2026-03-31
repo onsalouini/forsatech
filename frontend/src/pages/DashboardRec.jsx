@@ -77,6 +77,9 @@ function DashboardRec() {
 	const [candidacies, setCandidacies] = useState([])
 	const [cvByCandidate, setCvByCandidate] = useState({})
 	const [cvDetailsOpenByCandidate, setCvDetailsOpenByCandidate] = useState({})
+	const [cvExtractionByCandidate, setCvExtractionByCandidate] = useState({})
+	const [cvExtractionLoadingByCandidate, setCvExtractionLoadingByCandidate] = useState({})
+	const [cvExtractionErrorByCandidate, setCvExtractionErrorByCandidate] = useState({})
 	const [loadingCandidacies, setLoadingCandidacies] = useState(false)
 	const [candidaciesError, setCandidaciesError] = useState('')
 	const [interviews, setInterviews] = useState([])
@@ -172,6 +175,9 @@ function DashboardRec() {
 		if (ids.length === 0) {
 			setCvByCandidate({})
 			setCvDetailsOpenByCandidate({})
+			setCvExtractionByCandidate({})
+			setCvExtractionLoadingByCandidate({})
+			setCvExtractionErrorByCandidate({})
 			return
 		}
 
@@ -211,14 +217,55 @@ function DashboardRec() {
 			})
 			return next
 		})
+		setCvExtractionByCandidate((prev) => {
+			const next = {}
+			ids.forEach((id) => {
+				if (prev[id]) next[id] = prev[id]
+			})
+			return next
+		})
+		setCvExtractionLoadingByCandidate((prev) => {
+			const next = {}
+			ids.forEach((id) => {
+				next[id] = Boolean(prev[id])
+			})
+			return next
+		})
+		setCvExtractionErrorByCandidate((prev) => {
+			const next = {}
+			ids.forEach((id) => {
+				if (prev[id]) next[id] = prev[id]
+			})
+			return next
+		})
 	}
 
-	const toggleCvDetails = (candidateId) => {
+	const fetchCvExtraction = async (candidateId) => {
 		if (!candidateId) return
-		setCvDetailsOpenByCandidate((prev) => ({
-			...prev,
-			[candidateId]: !prev[candidateId],
-		}))
+		if (cvExtractionLoadingByCandidate[candidateId]) return
+
+		setCvExtractionLoadingByCandidate((prev) => ({ ...prev, [candidateId]: true }))
+		setCvExtractionErrorByCandidate((prev) => ({ ...prev, [candidateId]: '' }))
+
+		try {
+			const response = await fetch(`${API_BASE}/cv/extract/${candidateId}`)
+			const data = await response.json().catch(() => ({}))
+			if (!response.ok || !data?.success) {
+				const parts = [data?.message, data?.error, data?.hint].filter(Boolean)
+				throw new Error(parts.join(' — ') || 'Impossible d\'analyser le CV.')
+			}
+			setCvExtractionByCandidate((prev) => ({
+				...prev,
+				[candidateId]: data?.extraction || null,
+			}))
+		} catch (error) {
+			setCvExtractionErrorByCandidate((prev) => ({
+				...prev,
+				[candidateId]: error?.message || 'Erreur serveur.',
+			}))
+		} finally {
+			setCvExtractionLoadingByCandidate((prev) => ({ ...prev, [candidateId]: false }))
+		}
 	}
 
 	useEffect(() => {
@@ -1347,7 +1394,14 @@ function DashboardRec() {
 																		</a>
 																		<button
 																			type='button'
-																			onClick={() => toggleCvDetails(candidateId)}
+																			onClick={() => {
+																				const isOpen = Boolean(cvDetailsOpenByCandidate[candidateId])
+																				const nextOpen = !isOpen
+																				setCvDetailsOpenByCandidate((prev) => ({ ...prev, [candidateId]: nextOpen }))
+																				if (nextOpen && !cvExtractionByCandidate[candidateId]) {
+																					fetchCvExtraction(candidateId)
+																				}
+																			}}
 																			className='rounded-md border border-cyan-300 bg-white px-2 py-1 text-xs font-semibold text-cyan-700 hover:bg-cyan-50'
 																		>
 																			Details CV
@@ -1365,6 +1419,28 @@ function DashboardRec() {
 																		<p><span className='font-semibold'>Type:</span> {cvInfo.source === 'generated' ? 'CV Genere' : 'CV Uploade'}</p>
 																		<p><span className='font-semibold'>Cree le:</span> {cvInfo.createdAt ? new Date(cvInfo.createdAt).toLocaleDateString() : 'N/A'}</p>
 																		<p><span className='font-semibold'>Mis a jour le:</span> {cvInfo.updatedAt ? new Date(cvInfo.updatedAt).toLocaleDateString() : 'N/A'}</p>
+																		<div className='mt-2 rounded-md border border-cyan-100 bg-white p-2'>
+																			<p className='text-xs font-semibold text-[#103b62]'>Extraction (modèle)</p>
+																			{cvExtractionLoadingByCandidate[candidateId] ? (
+																				<p className='mt-1 text-xs text-[#587a99]'>Analyse en cours...</p>
+																			) : cvExtractionErrorByCandidate[candidateId] ? (
+																				<p className='mt-1 text-xs text-red-700'>{cvExtractionErrorByCandidate[candidateId]}</p>
+																			) : cvExtractionByCandidate[candidateId]?.entities ? (
+																				<div className='mt-2 space-y-1'>
+																					{cvExtractionByCandidate[candidateId]?.translation ? (
+																						<p className='text-[11px] text-[#587a99]'>Traduction: {String(cvExtractionByCandidate[candidateId].translation)}</p>
+																					) : null}
+																					{Object.entries(cvExtractionByCandidate[candidateId].entities).map(([label, values]) => (
+																						<div key={label} className='text-xs'>
+																							<p className='font-semibold text-[#103b62]'>{label}</p>
+																							<p className='text-[#2c5f84]'>{Array.isArray(values) ? values.join(' | ') : String(values || '')}</p>
+																						</div>
+																					))}
+																				</div>
+																			) : (
+																				<p className='mt-1 text-xs text-[#587a99]'>Cliquez sur Detail CV pour lancer l\'analyse.</p>
+																			)}
+																		</div>
 																	</div>
 																) : (
 																	null

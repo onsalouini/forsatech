@@ -2045,6 +2045,124 @@ app.get('/api/cv/by-id/:cvId', async (req, res) => {
   }
 });
 
+app.get('/api/cv/extract/:candidateId', async (req, res) => {
+  try {
+    const { candidateId } = req.params;
+
+    if (!candidateId) {
+      return res.status(400).json({
+        success: false,
+        message: 'candidateId est requis.',
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(String(candidateId))) {
+      return res.status(400).json({
+        success: false,
+        message: 'candidateId invalide.',
+      });
+    }
+
+    const cv = await findActiveOrLatestCv(candidateId);
+    if (!cv) {
+      return res.status(404).json({
+        success: false,
+        message: 'CV introuvable.',
+      });
+    }
+
+    const publicPath = String(cv?.uploadedFile?.path || '').trim();
+    if (!publicPath) {
+      return res.status(404).json({
+        success: false,
+        message: 'CV introuvable (fichier manquant).',
+      });
+    }
+
+    if (!publicPath.startsWith('/uploads/cv/')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Chemin du CV invalide.',
+      });
+    }
+
+    const absPath = resolveUploadPublicPathToAbsPath(publicPath);
+    if (!fs.existsSync(absPath)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Fichier CV introuvable sur le serveur.',
+      });
+    }
+
+    const analyzerBaseUrl = (process.env.CV_ANALYZER_URL || 'http://127.0.0.1:8001').toString().replace(/\/+$/, '');
+    const timeoutMs = readIntEnv('CV_ANALYZER_TIMEOUT_MS', 90000, { min: 5000, max: 300000 });
+
+    const fileBuffer = await fs.promises.readFile(absPath);
+    const fileName = String(cv?.uploadedFile?.originalName || cv?.uploadedFile?.fileName || 'cv.pdf');
+    const mimeType = String(cv?.uploadedFile?.mimeType || 'application/octet-stream');
+
+    const form = new FormData();
+    form.append('file', new Blob([fileBuffer], { type: mimeType }), fileName);
+    form.append('translate', 'false');
+    form.append('target_lang', 'en');
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    const resp = await fetch(`${analyzerBaseUrl}/extract`, {
+      method: 'POST',
+      body: form,
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeout));
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const detail = data?.detail || data?.message || `Erreur analyse CV (${resp.status})`;
+      return res.status(502).json({
+        success: false,
+        message: 'Service analyse CV indisponible ou en erreur.',
+        error: String(detail),
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      candidateId: String(candidateId),
+      cv: {
+        id: String(cv._id),
+        source: cv.source,
+        uploadedFile: cv.uploadedFile,
+        createdAt: cv.createdAt,
+        updatedAt: cv.updatedAt,
+      },
+      extraction: data,
+    });
+  } catch (error) {
+    const msg = String(error?.message || 'Erreur serveur');
+    const lowerMsg = msg.toLowerCase();
+    const isTimeout = lowerMsg.includes('aborted') || lowerMsg.includes('abort') || lowerMsg.includes('timeout');
+
+    const causeCode = error?.cause?.code ? String(error.cause.code) : '';
+    const isConnRefused = causeCode === 'ECONNREFUSED' || lowerMsg.includes('econnrefused') || lowerMsg.includes('fetch failed');
+    if (isConnRefused) {
+      const analyzerBaseUrl = (process.env.CV_ANALYZER_URL || 'http://127.0.0.1:8001').toString().replace(/\/+$/, '');
+      return res.status(503).json({
+        success: false,
+        message: 'Service analyse CV non démarré.',
+        error: msg,
+        hint: `Démarrez le service Python (analyse-cv) puis réessayez. URL attendue: ${analyzerBaseUrl}`,
+      });
+    }
+
+    return res.status(isTimeout ? 504 : 500).json({
+      success: false,
+      message: 'Erreur serveur pendant l extraction du CV.',
+      error: msg,
+      hint: 'Démarrez le service Python analyse-cv et vérifiez CV_ANALYZER_URL.',
+    });
+  }
+});
+
 app.post('/api/cv/suggestions', async (req, res) => {
   try {
     const { candidateId } = req.body || {};
