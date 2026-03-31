@@ -76,6 +76,7 @@ function DashboardRec() {
 	const [savingPassword, setSavingPassword] = useState(false)
 	const [candidacies, setCandidacies] = useState([])
 	const [cvByCandidate, setCvByCandidate] = useState({})
+	const [cvDetailsOpenByCandidate, setCvDetailsOpenByCandidate] = useState({})
 	const [loadingCandidacies, setLoadingCandidacies] = useState(false)
 	const [candidaciesError, setCandidaciesError] = useState('')
 	const [interviews, setInterviews] = useState([])
@@ -170,6 +171,7 @@ function DashboardRec() {
 
 		if (ids.length === 0) {
 			setCvByCandidate({})
+			setCvDetailsOpenByCandidate({})
 			return
 		}
 
@@ -191,6 +193,8 @@ function DashboardRec() {
 							url: fullUrl,
 							source: data.cv?.source || '',
 							fileName: data.cv?.uploadedFile?.originalName || data.cv?.uploadedFile?.fileName || 'CV',
+							createdAt: data.cv?.createdAt || '',
+							updatedAt: data.cv?.updatedAt || '',
 						},
 					]
 				} catch {
@@ -200,6 +204,21 @@ function DashboardRec() {
 		)
 
 		setCvByCandidate(Object.fromEntries(entries))
+		setCvDetailsOpenByCandidate((prev) => {
+			const next = {}
+			ids.forEach((id) => {
+				next[id] = Boolean(prev[id])
+			})
+			return next
+		})
+	}
+
+	const toggleCvDetails = (candidateId) => {
+		if (!candidateId) return
+		setCvDetailsOpenByCandidate((prev) => ({
+			...prev,
+			[candidateId]: !prev[candidateId],
+		}))
 	}
 
 	useEffect(() => {
@@ -1326,12 +1345,29 @@ function DashboardRec() {
 																		>
 																			Voir CV
 																		</a>
+																		<button
+																			type='button'
+																			onClick={() => toggleCvDetails(candidateId)}
+																			className='rounded-md border border-cyan-300 bg-white px-2 py-1 text-xs font-semibold text-cyan-700 hover:bg-cyan-50'
+																		>
+																			Detail CV
+																		</button>
 																		<span className='text-xs text-[#587a99]'>
 																			{cvInfo.source === 'generated' ? 'CV Genere' : 'CV Uploade'}
 																		</span>
 																	</div>
 																) : (
 																	<p className='mt-2 text-xs text-[#8aa3b9]'>CV non disponible</p>
+																)}
+																{cvInfo?.hasCv && cvDetailsOpenByCandidate[candidateId] ? (
+																	<div className='mt-2 rounded-md border border-cyan-100 bg-cyan-50/50 p-2 text-xs text-[#2c5f84]'>
+																		<p><span className='font-semibold'>Nom du fichier:</span> {cvInfo.fileName || 'CV'}</p>
+																		<p><span className='font-semibold'>Type:</span> {cvInfo.source === 'generated' ? 'CV Genere' : 'CV Uploade'}</p>
+																		<p><span className='font-semibold'>Cree le:</span> {cvInfo.createdAt ? new Date(cvInfo.createdAt).toLocaleDateString() : 'N/A'}</p>
+																		<p><span className='font-semibold'>Mis a jour le:</span> {cvInfo.updatedAt ? new Date(cvInfo.updatedAt).toLocaleDateString() : 'N/A'}</p>
+																	</div>
+																) : (
+																	null
 																)}
 															</div>
 														)
