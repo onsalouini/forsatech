@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { assets } from '../assets/assets'
+import { saveCvDraft } from '../utils/cvDraft'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 const API_ORIGIN = API_BASE.replace(/\/api\/?$/, '')
@@ -346,6 +347,11 @@ function DashboardCand() {
 	const [cvError, setCvError] = useState('')
 	const [cvUrl, setCvUrl] = useState('')
 	const [cvSource, setCvSource] = useState('')
+	const [cvHistory, setCvHistory] = useState([])
+	const [cvHistoryLoading, setCvHistoryLoading] = useState(false)
+	const [cvHistoryError, setCvHistoryError] = useState('')
+	const [activeCvId, setActiveCvId] = useState('')
+	const [selectedCvId, setSelectedCvId] = useState('')
 	const [suggestionsLoading, setSuggestionsLoading] = useState(false)
 	const [suggestionsError, setSuggestionsError] = useState('')
 	const [suggestionsHint, setSuggestionsHint] = useState('')
@@ -404,6 +410,8 @@ function DashboardCand() {
 	const [passwordError, setPasswordError] = useState('')
 
 	const normalizedSuggestions = useMemo(() => normalizeSuggestionsPayload(suggestionsData), [suggestionsData])
+	const activeCvMeta = useMemo(() => cvHistory.find((x) => x?.isActive) || null, [cvHistory])
+	const selectedCvMeta = useMemo(() => cvHistory.find((x) => String(x?._id) === String(selectedCvId)) || null, [cvHistory, selectedCvId])
 
 	useEffect(() => {
 		const job = jobs.find((j) => j.id === selectedJobId) || null
@@ -1078,26 +1086,10 @@ function DashboardCand() {
 		let cancelled = false
 		setCvLoading(true)
 		setCvError('')
-		setCvUrl('')
-		setCvSource('')
-
-		fetch(`${API_BASE}/cv/by-candidate/${candidateId}`)
-			.then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
-			.then(({ ok, json }) => {
-				if (cancelled) return
-				if (!ok || !json?.success) {
-					setCvError(json?.message || 'Impossible de charger votre CV.')
-					return
-				}
-				const cv = json.cv
-				const path = cv?.uploadedFile?.path || ''
-				setCvSource(cv?.source || '')
-				if (!path) {
-					setCvError("CV introuvable (fichier manquant).")
-					return
-				}
-				setCvUrl(`${API_ORIGIN}${path}`)
-			})
+		;(async () => {
+			await refreshCvHistory(candidateId, { autoSelect: true })
+			if (cancelled) return
+		})()
 			.catch(() => {
 				if (cancelled) return
 				setCvError('Serveur indisponible. Vérifiez que le backend tourne.')
@@ -1106,10 +1098,18 @@ function DashboardCand() {
 				if (cancelled) return
 				setCvLoading(false)
 			})
-
 		return () => {
 			cancelled = true
 		}
+	}, [selectedView, candidate])
+
+	useEffect(() => {
+		if (!candidate) return
+		if (selectedView !== 'settings') return
+		const candidateId = candidate?.id || candidate?._id
+		if (!candidateId) return
+		refreshCvHistory(candidateId, { autoSelect: false })
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [selectedView, candidate])
 
 	useEffect(() => {
@@ -1181,6 +1181,86 @@ function DashboardCand() {
 			setSuggestionsError('Serveur indisponible. Vérifiez que le backend tourne.')
 		} finally {
 			setSuggestionsLoading(false)
+		}
+	}
+
+	const refreshCvHistory = async (candidateId, { autoSelect = true } = {}) => {
+		if (!candidateId) return
+		setCvHistoryLoading(true)
+		setCvHistoryError('')
+		try {
+			const res = await fetch(`${API_BASE}/cv/history/${candidateId}`)
+			const data = await res.json().catch(() => ({}))
+			if (!res.ok || !data?.success) {
+				throw new Error(data?.message || "Impossible de charger l'historique des CV.")
+			}
+
+			const history = Array.isArray(data?.history) ? data.history : []
+			setCvHistory(history)
+
+			const active = history.find((x) => x?.isActive) || null
+			const nextActiveId = active?._id ? String(active._id) : ''
+			setActiveCvId(nextActiveId)
+
+			if (autoSelect) {
+				const hasSelected = selectedCvId && history.some((x) => String(x?._id) === String(selectedCvId))
+				const nextSelectedId = hasSelected ? String(selectedCvId) : String(active?._id || history?.[0]?._id || '')
+				setSelectedCvId(nextSelectedId)
+				const chosen = history.find((x) => String(x?._id) === String(nextSelectedId)) || null
+				const path = chosen?.filePath || ''
+				setCvSource(chosen?.source || '')
+				setCvUrl(path ? `${API_ORIGIN}${path}` : '')
+			}
+		} catch (e) {
+			setCvHistoryError(String(e?.message || 'Erreur'))
+			setCvHistory([])
+			setActiveCvId('')
+			if (autoSelect) {
+				setSelectedCvId('')
+				setCvUrl('')
+				setCvSource('')
+			}
+		} finally {
+			setCvHistoryLoading(false)
+		}
+	}
+
+	const handleSetActiveCv = async (cvId) => {
+		const candidateId = candidate?.id || candidate?._id
+		if (!candidateId || !cvId) return
+		setCvHistoryError('')
+		try {
+			const res = await fetch(`${API_BASE}/cv/set-active`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ candidateId, cvId }),
+			})
+			const data = await res.json().catch(() => ({}))
+			if (!res.ok || !data?.success) throw new Error(data?.message || 'Impossible de sélectionner ce CV.')
+			await refreshCvHistory(candidateId)
+		} catch (e) {
+			setCvHistoryError(String(e?.message || 'Erreur'))
+		}
+	}
+
+	const handleEditActiveGeneratedCv = async () => {
+		setSettingsCvError('')
+		setSettingsCvMessage('')
+		const candidateId = candidate?.id || candidate?._id
+		if (!candidateId || !activeCvId) {
+			setSettingsCvError('Aucun CV actif trouvé.')
+			return
+		}
+		try {
+			const res = await fetch(`${API_BASE}/cv/by-id/${activeCvId}?candidateId=${encodeURIComponent(candidateId)}`)
+			const data = await res.json().catch(() => ({}))
+			if (!res.ok || !data?.success) throw new Error(data?.message || 'Impossible de charger le CV.')
+			const cv = data?.cv || null
+			if (!cv) throw new Error('CV introuvable.')
+			saveCvDraft(candidateId, { personal: cv?.personal || {}, content: cv?.content || {} })
+			navigate('/EspaceCandidat/construire/etape-1')
+		} catch (e) {
+			setSettingsCvError(String(e?.message || 'Erreur'))
 		}
 	}
 
@@ -1283,7 +1363,7 @@ function DashboardCand() {
 			const res = await fetch(`${API_BASE}/candidacies`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ candidateId, jobOfferId: selectedJob.id }),
+				body: JSON.stringify({ candidateId, jobOfferId: selectedJob.id, cvId: activeCvId || undefined }),
 			})
 			const data = await res.json()
 			if (data.success) {
@@ -1721,7 +1801,8 @@ function DashboardCand() {
 									<div>
 										<p className='text-lg font-bold text-[#0d355b]'>Mon CV</p>
 										<p className='mt-1 text-sm text-[#4f7191]'>
-											{cvSource === 'uploaded' ? 'CV uploadé' : cvSource === 'generated' ? 'CV généré' : 'CV'}
+											{activeCvMeta?.source === 'uploaded' ? 'CV uploadé' : activeCvMeta?.source === 'generated' ? 'CV généré' : 'CV'}
+											{activeCvMeta?._id ? ' · Historique activé' : ''}
 										</p>
 									</div>
 									<div className='flex items-center gap-2'>
@@ -1745,22 +1826,86 @@ function DashboardCand() {
 									</div>
 								</div>
 
-								{cvLoading ? (
-									<div className='mt-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700'>Chargement du CV…</div>
+								{cvLoading || cvHistoryLoading ? (
+									<div className='mt-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700'>Chargement…</div>
+								) : null}
+								{cvHistoryError ? (
+									<div className='mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{cvHistoryError}</div>
 								) : null}
 								{cvError ? (
 									<div className='mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{cvError}</div>
 								) : null}
 
-								{!cvLoading && !cvError && cvUrl ? (
-									<div className='mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white'>
-										<div className='border-b border-slate-200 px-5 py-4 text-sm font-bold text-slate-700'>Aperçu</div>
-										<iframe
-											title='Mon CV'
-											src={cvUrl}
-											className='w-full bg-white'
-											style={{ height: '88vh' }}
-										/>
+								{cvHistory.length > 0 ? (
+									<div className='mt-5 grid gap-4 lg:grid-cols-[320px_1fr]'>
+										<div className='rounded-2xl border border-slate-200 bg-white p-4'>
+											<div className='flex items-center justify-between gap-2'>
+												<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>HISTORIQUE</p>
+												<Badge variant='slate'>{cvHistory.length}</Badge>
+											</div>
+											<div className='mt-3 max-h-[70vh] space-y-2 overflow-y-auto pr-1'>
+												{cvHistory.map((item) => {
+													const id = String(item?._id || '')
+													const isSelected = id && id === String(selectedCvId)
+													const createdAt = item?.createdAt ? new Date(item.createdAt) : null
+													const label = item?.source === 'uploaded' ? 'Upload' : item?.source === 'generated' ? 'Généré' : 'CV'
+													return (
+														<button
+															key={id}
+															type='button'
+															onClick={() => {
+																setSelectedCvId(id)
+																setCvSource(item?.source || '')
+																setCvError('')
+																const path = item?.filePath || ''
+																setCvUrl(path ? `${API_ORIGIN}${path}` : '')
+																if (!path) setCvError('CV introuvable (fichier manquant).')
+															}}
+															className={`w-full rounded-2xl border px-3 py-2 text-left transition ${isSelected ? 'border-cyan-200 bg-cyan-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+														>
+															<div className='flex items-start justify-between gap-2'>
+																<div>
+																	<p className='text-sm font-black text-[#103b62]'>{label}</p>
+																	<p className='mt-0.5 text-xs font-semibold text-slate-500'>
+																		{createdAt ? createdAt.toLocaleString() : '—'}
+																	</p>
+																</div>
+																<div className='flex items-center gap-2'>
+																	{item?.isActive ? <Badge variant='emerald'>Actif</Badge> : null}
+																</div>
+															</div>
+														</button>
+													)
+												})}
+											</div>
+
+											<div className='mt-4 flex items-center justify-between gap-2'>
+												<div className='text-xs font-semibold text-slate-500'>
+													{selectedCvMeta?.isActive ? 'Ce CV est utilisé pour postuler.' : 'Vous pouvez choisir ce CV pour postuler.'}
+												</div>
+												<button
+													type='button'
+													onClick={() => selectedCvId && handleSetActiveCv(selectedCvId)}
+													disabled={!selectedCvId || Boolean(selectedCvMeta?.isActive)}
+													className={`rounded-xl px-4 py-2 text-xs font-semibold text-white transition ${!selectedCvId || selectedCvMeta?.isActive ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'}`}
+												>
+													Utiliser pour postuler
+												</button>
+											</div>
+										</div>
+
+										<div className='overflow-hidden rounded-2xl border border-slate-200 bg-white'>
+											<div className='border-b border-slate-200 px-5 py-4 text-sm font-bold text-slate-700'>Aperçu</div>
+											{cvUrl ? (
+												<iframe title='Mon CV' src={cvUrl} className='w-full bg-white' style={{ height: '88vh' }} />
+											) : (
+												<div className='p-5 text-sm font-semibold text-slate-600'>Aperçu indisponible.</div>
+											)}
+										</div>
+									</div>
+								) : !cvHistoryLoading && !cvHistoryError ? (
+									<div className='mt-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700'>
+										Aucun CV trouvé. Uploadez un CV ou générez-en un.
 									</div>
 								) : null}
 							</div>
@@ -2094,6 +2239,21 @@ function DashboardCand() {
 									</div>
 
 									<div className='space-y-5'>
+										{activeCvMeta?.source === 'generated' ? (
+											<div className='rounded-2xl border border-slate-200 bg-white p-5'>
+												<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>CV GÉNÉRÉ</p>
+												<p className='mt-2 text-sm text-slate-600'>Modifiez vos informations puis régénérez un nouveau CV (il sera ajouté à l’historique).</p>
+												<div className='mt-4'>
+													<button
+														type='button'
+														onClick={handleEditActiveGeneratedCv}
+														className='rounded-xl bg-[#001d3e] px-5 py-2.5 text-sm font-semibold text-white transition hover:opacity-95'
+													>
+														Modifier et générer un nouveau CV
+													</button>
+												</div>
+											</div>
+										) : null}
 										<div className='rounded-2xl border border-slate-200 bg-white p-5'>
 											<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>CHANGER DE CV</p>
 											{settingsCvError ? (

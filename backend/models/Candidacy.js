@@ -14,6 +14,13 @@ const candidacySchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    cvId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'CV',
+      required: false,
+      index: true,
+      default: null,
+    },
     status: {
       type: String,
       enum: ['applied', 'reviewed', 'accepted', 'rejected'],

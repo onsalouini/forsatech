@@ -19,6 +19,13 @@ const cvSchema = new mongoose.Schema(
       required: true,
     },
 
+    // When multiple CV versions exist, the active one is the default used for preview/matching/applying.
+    isActive: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+
     source: {
       type: String,
       enum: ['generated', 'uploaded'],
@@ -135,6 +142,8 @@ const cvSchema = new mongoose.Schema(
   }
 );
 
-cvSchema.index({ candidateId: 1 }, { unique: true });
+// Note: we intentionally allow multiple CVs per candidate (history).
+cvSchema.index({ candidateId: 1, createdAt: -1 });
+cvSchema.index({ candidateId: 1, isActive: 1 });
 
 module.exports = mongoose.model('CV', cvSchema);

@@ -217,31 +217,60 @@ function buildCandidateCvText(cvDoc) {
   if (!cvDoc) return '';
   const p = cvDoc.personal || {};
   const c = cvDoc.content || {};
-  const parts = [
-    [p.firstName, p.lastName].filter(Boolean).join(' '),
-    p.professionalTitle,
-    p.email,
-    p.phone,
-    p.city,
-    p.country,
-    p.linkedin,
-    p.portfolio,
-    c.professionalSummary,
-    c.skills,
-    ...(Array.isArray(c.experienceItems) ? c.experienceItems.flatMap((x) => [x.title, x.company, x.location, x.period, x.description, x.stack]) : []),
-    ...(Array.isArray(c.educationItems) ? c.educationItems.flatMap((x) => [x.degree, x.institution, x.specialty, x.city, x.mention, x.pfeTitle]) : []),
-    ...(Array.isArray(c.languages) ? c.languages.flatMap((x) => [x.name, x.level, x.certification]) : []),
-    ...(Array.isArray(c.projects) ? c.projects.flatMap((x) => [x.name, x.type, x.role, x.description, x.technologies, x.githubUrl, x.demoUrl]) : []),
-    ...(Array.isArray(c.certifications) ? c.certifications.flatMap((x) => [x.name, x.organization, x.obtainedAt, x.verificationUrl]) : []),
-    ...(Array.isArray(c.qualities) ? c.qualities : []),
-    ...(Array.isArray(c.interests) ? c.interests : []),
-  ];
-  return parts.map((x) => String(x || '').trim()).filter(Boolean).join('\n');
+
+  const parts = [];
+  parts.push([p.firstName, p.lastName].filter(Boolean).join(' '));
+  parts.push(p.professionalTitle);
+  parts.push(p.email);
+  parts.push(p.phone);
+  parts.push(p.city);
+  parts.push(p.country);
+  parts.push(p.linkedin);
+  parts.push(p.portfolio);
+
+  parts.push(c.professionalSummary);
+  parts.push(c.education);
+  parts.push(c.experience);
+  parts.push(c.skills);
+
+  if (Array.isArray(c.educationItems)) {
+    for (const it of c.educationItems) {
+      parts.push([it.degree, it.institution, it.specialty, it.city, it.startYear, it.endYear, it.mention, it.pfeTitle].filter(Boolean).join(' '));
+    }
+  }
+  if (Array.isArray(c.experienceItems)) {
+    for (const it of c.experienceItems) {
+      parts.push([it.title, it.company, it.location, it.period, it.stack, it.description].filter(Boolean).join(' '));
+    }
+  }
+  if (Array.isArray(c.languages)) {
+    for (const it of c.languages) {
+      parts.push([it.name, it.level, it.certification].filter(Boolean).join(' '));
+    }
+  }
+  if (Array.isArray(c.certifications)) {
+    for (const it of c.certifications) {
+      parts.push([it.name, it.organization, it.obtainedAt, it.identifier, it.verificationUrl].filter(Boolean).join(' '));
+    }
+  }
+  if (Array.isArray(c.projects)) {
+    for (const it of c.projects) {
+      parts.push([it.name, it.type, it.period, it.role, it.technologies, it.githubUrl, it.demoUrl, it.description].filter(Boolean).join(' '));
+    }
+  }
+  if (Array.isArray(c.qualities)) parts.push(...c.qualities);
+  if (Array.isArray(c.interests)) parts.push(...c.interests);
+
+  return parts
+    .map((x) => String(x || '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n');
 }
 
-function renderListItems(itemsStrList) {
-  if (!itemsStrList || !itemsStrList.length) return '';
-  return `<ul>${itemsStrList.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`;
+function renderListItems(items) {
+  const list = Array.isArray(items) ? items.filter((x) => String(x || '').trim() !== '') : [];
+  if (!list.length) return '';
+  return `<ul>${list.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`;
 }
 
 function buildCvHtml(personal, content) {
@@ -1351,30 +1380,27 @@ app.post('/api/cv/generated', async (req, res) => {
     const stats = fs.statSync(absPath);
     const publicPath = `/uploads/cv/${fileName}`;
 
-    const updated = await CV.findOneAndUpdate(
-      { candidateId },
-      {
-        $set: {
-          candidateId,
-          source: 'generated',
-          personal: mergedPersonal,
-          content: mergedContent,
-          uploadedFile: {
-            originalName: `cv-${candidateId}.html`,
-            fileName,
-            mimeType: 'text/html',
-            size: stats.size || 0,
-            path: publicPath,
-          },
-        },
+    // CV history: create a new CV entry and mark it as active.
+    await CV.updateMany({ candidateId }, { $set: { isActive: false } });
+    const created = await CV.create({
+      candidateId,
+      isActive: true,
+      source: 'generated',
+      personal: mergedPersonal,
+      content: mergedContent,
+      uploadedFile: {
+        originalName: `cv-${candidateId}.html`,
+        fileName,
+        mimeType: 'text/html',
+        size: stats.size || 0,
+        path: publicPath,
       },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
-    );
+    });
 
     return res.status(200).json({
       success: true,
       message: 'CV généré et enregistré avec succès.',
-      cv: updated,
+      cv: created,
     });
   } catch (error) {
     return res.status(500).json({
@@ -1388,6 +1414,11 @@ app.post('/api/cv/generated', async (req, res) => {
 function resolveUploadPublicPathToAbsPath(publicPath) {
   const rel = String(publicPath || '').replace(/^\/+/, '');
   return path.join(__dirname, rel);
+}
+
+async function findActiveOrLatestCv(candidateId, { lean = false } = {}) {
+  const query = CV.findOne({ candidateId }).sort({ isActive: -1, createdAt: -1 });
+  return lean ? query.lean() : query;
 }
 
 async function extractCvTextFromFile(absPath, mimeTypeHint) {
@@ -1864,28 +1895,24 @@ app.post('/api/cv/upload', (req, res) => {
       }
 
       const publicPath = `/uploads/cv/${req.file.filename}`;
-      const updated = await CV.findOneAndUpdate(
-        { candidateId },
-        {
-          $set: {
-            candidateId,
-            source: 'uploaded',
-            uploadedFile: {
-              originalName: req.file.originalname || '',
-              fileName: req.file.filename || '',
-              mimeType: req.file.mimetype || '',
-              size: req.file.size || 0,
-              path: publicPath,
-            },
-          },
+      await CV.updateMany({ candidateId }, { $set: { isActive: false } });
+      const created = await CV.create({
+        candidateId,
+        isActive: true,
+        source: 'uploaded',
+        uploadedFile: {
+          originalName: req.file.originalname || '',
+          fileName: req.file.filename || '',
+          mimeType: req.file.mimetype || '',
+          size: req.file.size || 0,
+          path: publicPath,
         },
-        { new: true, upsert: true, setDefaultsOnInsert: true }
-      );
+      });
 
       return res.status(200).json({
         success: true,
         message: 'CV uploadé et enregistré avec succès.',
-        cv: updated,
+        cv: created,
       });
     } catch (error) {
       return res.status(500).json({
@@ -1908,7 +1935,7 @@ app.get('/api/cv/by-candidate/:candidateId', async (req, res) => {
       });
     }
 
-    const cv = await CV.findOne({ candidateId });
+    const cv = await findActiveOrLatestCv(candidateId);
     if (!cv) {
       return res.status(404).json({
         success: false,
@@ -1920,6 +1947,95 @@ app.get('/api/cv/by-candidate/:candidateId', async (req, res) => {
       success: true,
       cv,
     });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur pendant la récupération du CV.',
+      error: error.message,
+    });
+  }
+});
+
+app.get('/api/cv/history/:candidateId', async (req, res) => {
+  try {
+    const { candidateId } = req.params;
+    if (!candidateId) {
+      return res.status(400).json({ success: false, message: 'candidateId est requis.' });
+    }
+
+    const items = await CV.find({ candidateId })
+      .sort({ createdAt: -1 })
+      .select('_id source isActive createdAt uploadedFile personal')
+      .lean();
+
+    const history = (items || []).map((cv) => ({
+      _id: cv._id,
+      source: cv.source,
+      isActive: Boolean(cv.isActive),
+      createdAt: cv.createdAt,
+      title: cv?.personal?.professionalTitle || '',
+      filePath: cv?.uploadedFile?.path || '',
+      mimeType: cv?.uploadedFile?.mimeType || '',
+      fileName: cv?.uploadedFile?.fileName || '',
+    }));
+
+    return res.status(200).json({ success: true, history });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Erreur serveur pendant la récupération de l'historique des CV.",
+      error: error.message,
+    });
+  }
+});
+
+app.post('/api/cv/set-active', async (req, res) => {
+  try {
+    const { candidateId, cvId } = req.body || {};
+    if (!candidateId || !cvId) {
+      return res.status(400).json({ success: false, message: 'candidateId et cvId sont requis.' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(String(candidateId)) || !mongoose.Types.ObjectId.isValid(String(cvId))) {
+      return res.status(400).json({ success: false, message: 'candidateId ou cvId invalide.' });
+    }
+
+    const cv = await CV.findOne({ _id: cvId, candidateId });
+    if (!cv) {
+      return res.status(404).json({ success: false, message: 'CV introuvable pour ce candidat.' });
+    }
+
+    await CV.updateMany({ candidateId }, { $set: { isActive: false } });
+    await CV.updateOne({ _id: cvId }, { $set: { isActive: true } });
+
+    const active = await CV.findById(cvId);
+    return res.status(200).json({ success: true, message: 'CV actif mis à jour.', cv: active });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur pendant la sélection du CV actif.',
+      error: error.message,
+    });
+  }
+});
+
+app.get('/api/cv/by-id/:cvId', async (req, res) => {
+  try {
+    const { cvId } = req.params;
+    const candidateId = String(req.query.candidateId || '').trim();
+
+    if (!cvId || !candidateId) {
+      return res.status(400).json({ success: false, message: 'cvId et candidateId sont requis.' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(String(candidateId)) || !mongoose.Types.ObjectId.isValid(String(cvId))) {
+      return res.status(400).json({ success: false, message: 'cvId ou candidateId invalide.' });
+    }
+
+    const cv = await CV.findOne({ _id: cvId, candidateId });
+    if (!cv) {
+      return res.status(404).json({ success: false, message: 'CV introuvable.' });
+    }
+
+    return res.status(200).json({ success: true, cv });
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -1946,7 +2062,7 @@ app.post('/api/cv/suggestions', async (req, res) => {
       });
     }
 
-    const cv = await CV.findOne({ candidateId });
+    const cv = await findActiveOrLatestCv(candidateId);
     if (!cv) {
       return res.status(404).json({
         success: false,
@@ -2256,7 +2372,7 @@ app.get('/api/offers/match/:candidateId', async (req, res) => {
     // Optional filtering
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 60, 1), 200);
 
-    const cv = await CV.findOne({ candidateId }).lean();
+    const cv = await findActiveOrLatestCv(candidateId, { lean: true });
     if (!cv) {
       return res.status(200).json({ success: true, matches: [], message: 'Aucun CV enregistré pour ce candidat.' });
     }
@@ -2455,7 +2571,7 @@ app.delete('/api/offers/:id', async (req, res) => {
 // Candidacy routes
 app.post('/api/candidacies', async (req, res) => {
   try {
-    const { candidateId, jobOfferId } = req.body;
+    const { candidateId, jobOfferId, cvId } = req.body;
     if (!candidateId || !jobOfferId) {
       return res.status(400).json({
         success: false,
@@ -2472,7 +2588,22 @@ app.post('/api/candidacies', async (req, res) => {
       });
     }
 
-    const candidacy = new Candidacy({ candidateId, jobOfferId });
+    let effectiveCvId = null;
+    if (cvId) {
+      if (!mongoose.Types.ObjectId.isValid(String(cvId))) {
+        return res.status(400).json({ success: false, message: 'cvId invalide.' });
+      }
+      const cv = await CV.findOne({ _id: cvId, candidateId }).select('_id').lean();
+      if (!cv?._id) {
+        return res.status(404).json({ success: false, message: 'CV introuvable pour ce candidat.' });
+      }
+      effectiveCvId = cv._id;
+    } else {
+      const cv = await findActiveOrLatestCv(candidateId, { lean: true });
+      if (cv?._id) effectiveCvId = cv._id;
+    }
+
+    const candidacy = new Candidacy({ candidateId, jobOfferId, cvId: effectiveCvId });
     await candidacy.save();
 
     res.status(201).json({
