@@ -1350,7 +1350,7 @@ function DashboardRec() {
 																			onClick={() => toggleCvDetails(candidateId)}
 																			className='rounded-md border border-cyan-300 bg-white px-2 py-1 text-xs font-semibold text-cyan-700 hover:bg-cyan-50'
 																		>
-																			Detail CV
+																			Details CV
 																		</button>
 																		<span className='text-xs text-[#587a99]'>
 																			{cvInfo.source === 'generated' ? 'CV Genere' : 'CV Uploade'}
