@@ -9,6 +9,8 @@ const multer = require('multer');
 const cheerio = require('cheerio');
 const pdfParse = require('pdf-parse');
 const bcrypt = require('bcryptjs');
+const PasswordResetToken = require('./models/PasswordResetToken');
+const { getMailerTransporter, getFromAddress } = require('./utils/mailer');
 const Recruiter = require('./models/Recruiter');
 const Candidate = require('./models/Candidate');
 const JobOffer = require('./models/JobOffer');
@@ -100,6 +102,52 @@ function splitSkills(skillsStr) {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isValidEmail(value) {
+  const email = normalizeEmail(value);
+  if (!email) return false;
+  // Basic validation; final validation is done by provider.
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function getClientIp(req) {
+  const raw = (req.headers['x-forwarded-for'] || '').toString();
+  if (raw) return raw.split(',')[0].trim();
+  return req.ip || req.connection?.remoteAddress || '';
+}
+
+function sha256Hex(value) {
+  return crypto.createHash('sha256').update(String(value)).digest('hex');
+}
+
+const passwordResetRateLimit = {
+  // in-memory rate limiting (sufficient for single-instance dev)
+  windowMs: 10 * 60 * 1000,
+  maxPerIp: 20,
+  maxPerEmail: 5,
+  ipHits: new Map(),
+  emailHits: new Map(),
+};
+
+function purgeOldHits(map, now, windowMs) {
+  for (const [key, timestamps] of map.entries()) {
+    const filtered = (timestamps || []).filter((t) => now - t <= windowMs);
+    if (!filtered.length) map.delete(key);
+    else map.set(key, filtered);
+  }
+}
+
+function recordHit(map, key, now, windowMs) {
+  const list = map.get(key) || [];
+  const filtered = list.filter((t) => now - t <= windowMs);
+  filtered.push(now);
+  map.set(key, filtered);
+  return filtered.length;
 }
 
 function normalizeTextForMatch(value) {
@@ -989,6 +1037,186 @@ app.post('/api/candidates/login', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Erreur serveur pendant la connexion.',
+      error: error.message,
+    });
+  }
+});
+
+// Password reset (OTP by email)
+// SMTP config example (Brevo):
+// SMTP_HOST=smtp-relay.brevo.com
+// SMTP_PORT=587
+// SMTP_USER=...
+// SMTP_PASS=... (SMTP key)
+// MAIL_FROM="AIR <no-reply@yourdomain.com>"
+app.post('/api/auth/password-reset/request', async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    const now = Date.now();
+    purgeOldHits(passwordResetRateLimit.ipHits, now, passwordResetRateLimit.windowMs);
+    purgeOldHits(passwordResetRateLimit.emailHits, now, passwordResetRateLimit.windowMs);
+
+    const ip = getClientIp(req);
+    const ipCount = recordHit(passwordResetRateLimit.ipHits, ip, now, passwordResetRateLimit.windowMs);
+    if (ipCount > passwordResetRateLimit.maxPerIp) {
+      return res.status(429).json({
+        success: false,
+        message: 'Trop de tentatives. Veuillez reessayer plus tard.',
+      });
+    }
+
+    if (!isValidEmail(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Veuillez fournir un email valide.',
+      });
+    }
+
+    const emailCount = recordHit(passwordResetRateLimit.emailHits, email, now, passwordResetRateLimit.windowMs);
+    if (emailCount > passwordResetRateLimit.maxPerEmail) {
+      return res.status(429).json({
+        success: false,
+        message: 'Trop de demandes pour cet email. Veuillez reessayer plus tard.',
+      });
+    }
+
+    // Avoid user enumeration: respond success even if email not found.
+    const candidate = await Candidate.findOne({ email });
+    const recruiter = candidate ? null : await Recruiter.findOne({ email });
+    const userExists = Boolean(candidate || recruiter);
+
+    if (!userExists) {
+      return res.status(200).json({
+        success: true,
+        message: "Si un compte existe avec cet email, un code a ete envoye.",
+      });
+    }
+
+    const transporter = getMailerTransporter();
+    if (!transporter) {
+      return res.status(500).json({
+        success: false,
+        message: "SMTP non configure. Ajoutez SMTP_HOST/SMTP_USER/SMTP_PASS dans .env.",
+      });
+    }
+
+    const code = String(crypto.randomInt(100000, 1000000)); // 6 digits
+    const codeHash = sha256Hex(code);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    // Invalidate previous tokens for this email.
+    await PasswordResetToken.deleteMany({ email });
+    await PasswordResetToken.create({ email, codeHash, expiresAt, attempts: 0, consumedAt: null });
+
+    const from = getFromAddress();
+    const subject = 'Votre code de verification AIR';
+    const text = `Bonjour,\n\nVotre code de verification AIR est : ${code}\n\nIl expire dans 10 minutes.\nSi vous n'etes pas a l'origine de cette demande, ignorez cet email.\n\nAIR`;
+    const html = `
+      <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+        <h2 style="margin:0 0 12px 0">Votre code de verification</h2>
+        <p style="margin:0 0 12px 0">Voici votre code de verification AIR :</p>
+        <div style="font-size:28px;font-weight:800;letter-spacing:4px;background:#f1f5f9;border-radius:12px;padding:14px 18px;display:inline-block">${code}</div>
+        <p style="margin:16px 0 0 0;color:#475569">Ce code expire dans 10 minutes.</p>
+        <p style="margin:12px 0 0 0;color:#475569">Si vous n'etes pas a l'origine de cette demande, ignorez cet email.</p>
+      </div>
+    `;
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[password-reset] Sending OTP email', { to: email, from });
+    }
+
+    const info = await transporter.sendMail({
+      from,
+      to: email,
+      subject,
+      text,
+      html,
+    });
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[password-reset] Email accepted by SMTP', {
+        messageId: info?.messageId,
+        response: info?.response,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Code envoye par email.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur pendant la demande de reinitialisation.',
+      error: error.message,
+    });
+  }
+});
+
+app.post('/api/auth/password-reset/confirm', async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    const code = String(req.body?.code || '').trim();
+    const newPassword = String(req.body?.newPassword || '');
+
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ success: false, message: 'Email invalide.' });
+    }
+    if (!code) {
+      return res.status(400).json({ success: false, message: 'Code requis.' });
+    }
+    if (!newPassword || newPassword.length < 8) {
+      return res.status(400).json({ success: false, message: 'Le mot de passe doit contenir au moins 8 caracteres.' });
+    }
+
+    const token = await PasswordResetToken.findOne({ email, consumedAt: null }).sort({ createdAt: -1 });
+    if (!token) {
+      return res.status(400).json({ success: false, message: 'Code invalide ou expire.' });
+    }
+
+    if (token.expiresAt && token.expiresAt.getTime() < Date.now()) {
+      return res.status(400).json({ success: false, message: 'Code invalide ou expire.' });
+    }
+
+    if ((token.attempts || 0) >= 5) {
+      return res.status(429).json({ success: false, message: 'Trop de tentatives. Redemandez un nouveau code.' });
+    }
+
+    const providedHash = sha256Hex(code);
+    if (providedHash !== token.codeHash) {
+      token.attempts = (token.attempts || 0) + 1;
+      await token.save();
+      return res.status(400).json({ success: false, message: 'Code invalide ou expire.' });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    const candidate = await Candidate.findOne({ email });
+    const recruiter = candidate ? null : await Recruiter.findOne({ email });
+
+    if (!candidate && !recruiter) {
+      return res.status(400).json({ success: false, message: 'Impossible de reinitialiser le mot de passe.' });
+    }
+
+    if (candidate) {
+      candidate.passwordHash = passwordHash;
+      await candidate.save();
+    }
+    if (recruiter) {
+      recruiter.passwordHash = passwordHash;
+      await recruiter.save();
+    }
+
+    token.consumedAt = new Date();
+    await token.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Mot de passe reinitialise avec succes.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur pendant la reinitialisation.',
       error: error.message,
     });
   }

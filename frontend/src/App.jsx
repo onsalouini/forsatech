@@ -13,6 +13,7 @@ import CandidateCVBuildStep1 from './pages/CandidateCVBuildStep1.jsx'
 import CandidateCVBuildReview from './pages/CandidateCVBuildReview.jsx'
 import DashboardCand from './pages/DashboardCand.jsx'
 import ChooseRole from './pages/ChooseRole.jsx'
+import MotDePasseOublie from './pages/MotDePasseOublie.jsx'
 import './index.css';
 
 
@@ -28,7 +29,8 @@ function App() {
     location.pathname === '/connexion' ||
     location.pathname === '/cnnx' ||
     location.pathname === '/connesion' ||
-    location.pathname === '/inscrire'
+    location.pathname === '/inscrire' ||
+    location.pathname === '/mot-de-passe-oublie'
 
   const contentPadding = isDashboardPage || isAuthPage ? '' : 'px-4 sm:px-[5vw] md:px-[7vw] lg:px-[9vw]'
 
@@ -45,6 +47,7 @@ function App() {
       <Route path='/cnnx' element={<CnnxRec/>}/>
       <Route path='/connesion' element={<CnnxRec/>}/>
       <Route path='/inscrire' element={<CnnxRec/>}/>
+      <Route path='/mot-de-passe-oublie' element={<MotDePasseOublie/>}/>
       <Route path='/dashboard-rec' element={<DashboardRec/>}/>
       <Route path='/EspaceRecruteur' element={<DashboardRec/>}/>
 

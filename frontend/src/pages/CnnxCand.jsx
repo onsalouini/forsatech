@@ -293,6 +293,15 @@ function CnnxCand() {
 													{showLoginPassword ? 'Masquer' : 'Afficher'}
 												</button>
 											</div>
+											<div className='flex items-center justify-between'>
+												<button
+													type='button'
+													onClick={() => navigate('/mot-de-passe-oublie?redirect=/connecter')}
+													className='text-sm text-[#0a5f88] underline decoration-dotted underline-offset-4'
+												>
+													Mot de passe oublie ?
+												</button>
+											</div>
 										</div>
 
 										<button

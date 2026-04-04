@@ -278,7 +278,7 @@ function CnnxRec() {
 										<div className='flex items-center justify-between'>
 											<button
 												type='button'
-												onClick={() => alert('Astuce: utilisez la connexion SSO ou contactez votre administrateur RH.')}
+												onClick={() => navigate('/mot-de-passe-oublie?redirect=/connexion')}
 												className='text-sm text-[#0a5f88] underline decoration-dotted underline-offset-4'
 											>
 												Mot de passe oublie ?
