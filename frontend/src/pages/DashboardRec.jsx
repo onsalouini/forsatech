@@ -433,6 +433,34 @@ function DashboardRec() {
 		return Array.from(groups.values()).sort((a, b) => b.items.length - a.items.length)
 	}, [candidacies])
 
+	const interviewCandidatesForOffer = useMemo(() => {
+		if (!interviewForm.offerId) return []
+
+		const uniqueById = new Map()
+		for (const candidacy of candidacies) {
+			const offerRaw = candidacy?.jobOfferId
+			const offerId = typeof offerRaw === 'object' ? offerRaw?._id : offerRaw
+			if (offerId !== interviewForm.offerId) continue
+
+			const candidateRaw = candidacy?.candidateId
+			const candidateId = typeof candidateRaw === 'string' ? candidateRaw : candidateRaw?._id
+			if (!candidateId || uniqueById.has(candidateId)) continue
+
+			const firstName = typeof candidateRaw === 'object' ? candidateRaw?.firstName || '' : ''
+			const lastName = typeof candidateRaw === 'object' ? candidateRaw?.lastName || '' : ''
+			const fullName = `${firstName} ${lastName}`.trim() || 'Candidat'
+			const email = typeof candidateRaw === 'object' ? candidateRaw?.email || '' : ''
+
+			uniqueById.set(candidateId, {
+				id: candidateId,
+				name: fullName,
+				email,
+			})
+		}
+
+		return Array.from(uniqueById.values()).sort((a, b) => a.name.localeCompare(b.name, 'fr'))
+	}, [candidacies, interviewForm.offerId])
+
 	const upcomingInterviews = useMemo(() => {
 		return interviews
 			.filter((it) => it?.scheduledAt)
@@ -650,6 +678,36 @@ function DashboardRec() {
 		}))
 	}
 
+	const handleInterviewOfferChange = (offerId) => {
+		setInterviewForm((prev) => ({
+			...prev,
+			offerId,
+			candidateId: '',
+			candidateName: '',
+			candidateEmail: '',
+		}))
+	}
+
+	const handleInterviewCandidateChange = (candidateId) => {
+		if (!candidateId) {
+			setInterviewForm((prev) => ({
+				...prev,
+				candidateId: '',
+				candidateName: '',
+				candidateEmail: '',
+			}))
+			return
+		}
+
+		const selectedCandidate = interviewCandidatesForOffer.find((c) => c.id === candidateId)
+		setInterviewForm((prev) => ({
+			...prev,
+			candidateId,
+			candidateName: selectedCandidate?.name || '',
+			candidateEmail: selectedCandidate?.email || '',
+		}))
+	}
+
 	const updateInterviewField = (field, value) => {
 		setInterviewForm((prev) => ({ ...prev, [field]: value }))
 	}
@@ -664,7 +722,7 @@ function DashboardRec() {
 		setInterviewMessage('')
 
 		if (!interviewForm.offerId || !interviewForm.candidateName || !interviewForm.scheduledAt) {
-			setInterviewError('Offre, nom du candidat et date/heure sont requis.')
+			setInterviewError('Offre, candidat et date/heure sont requis.')
 			return
 		}
 
@@ -1485,7 +1543,7 @@ function DashboardRec() {
 												<select
 													className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-500'
 													value={interviewForm.offerId}
-													onChange={(e) => updateInterviewField('offerId', e.target.value)}
+														onChange={(e) => handleInterviewOfferChange(e.target.value)}
 												>
 													<option value=''>Selectionner une offre</option>
 													{offers.map((offer) => (
@@ -1498,12 +1556,29 @@ function DashboardRec() {
 
 											<div className='grid gap-3 sm:grid-cols-2'>
 												<div>
-													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Nom candidat</label>
-													<input
+														<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Candidat</label>
+														<select
 														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-500'
-														placeholder='Ex: Sami Ben Ali'
-														value={interviewForm.candidateName}
-														onChange={(e) => updateInterviewField('candidateName', e.target.value)}
+															value={interviewForm.candidateId}
+															onChange={(e) => handleInterviewCandidateChange(e.target.value)}
+															disabled={!interviewForm.offerId}
+														>
+															<option value=''>
+																{!interviewForm.offerId ? 'Choisir une offre d abord' : 'Selectionner un candidat'}
+															</option>
+															{interviewCandidatesForOffer.map((candidate) => (
+																<option key={candidate.id} value={candidate.id}>
+																	{candidate.name}
+																</option>
+															))}
+														</select>
+														{interviewForm.offerId && interviewCandidatesForOffer.length === 0 ? (
+															<p className='mt-1 text-xs text-[#587a99]'>Aucun candidat n a encore postule a cette offre.</p>
+														) : null}
+														<input
+															type='hidden'
+															value={interviewForm.candidateName}
+															readOnly
 													/>
 												</div>
 												<div>

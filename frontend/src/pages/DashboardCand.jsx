@@ -327,6 +327,10 @@ function DashboardCand() {
 	const [dashboardStats, setDashboardStats] = useState(null)
 	const [dashboardLoading, setDashboardLoading] = useState(false)
 	const [dashboardError, setDashboardError] = useState('')
+	const [interviewCalendarMonth, setInterviewCalendarMonth] = useState(() => {
+		const now = new Date()
+		return new Date(now.getFullYear(), now.getMonth(), 1)
+	})
 	const [selectedJobId, setSelectedJobId] = useState(null)
 	const [savedJobs, setSavedJobs] = useState(() => new Set())
 	const [searchQuery, setSearchQuery] = useState('')
@@ -1072,6 +1076,109 @@ function DashboardCand() {
 		return { values: v.length === 24 ? v : new Array(24).fill(0), labels }
 	}, [dashboardStats])
 
+	const dashboardUpcomingInterviews = useMemo(() => {
+		const raw = dashboardStats?.offers?.upcomingInterviews
+		if (!Array.isArray(raw)) return []
+		return raw
+			.map((item) => {
+				const dt = item?.scheduledAt ? new Date(item.scheduledAt) : null
+				if (!dt || Number.isNaN(dt.getTime())) return null
+				return {
+					interviewId: item?.interviewId || `${item?.title || 'offer'}-${dt.getTime()}`,
+					title: item?.title || 'Offre',
+					scheduledAt: dt,
+				}
+			})
+			.filter(Boolean)
+			.sort((a, b) => a.scheduledAt.getTime() - b.scheduledAt.getTime())
+	}, [dashboardStats])
+
+	const interviewCalendarTitle = useMemo(() => {
+		return interviewCalendarMonth.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+	}, [interviewCalendarMonth])
+
+	const interviewCalendarDays = useMemo(() => {
+		const firstDay = new Date(interviewCalendarMonth.getFullYear(), interviewCalendarMonth.getMonth(), 1)
+		const startWeekDay = (firstDay.getDay() + 6) % 7
+		const startDate = new Date(firstDay)
+		startDate.setDate(firstDay.getDate() - startWeekDay)
+
+		const byDay = new Map()
+		for (const it of dashboardUpcomingInterviews) {
+			const d = it.scheduledAt
+			const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+			if (!byDay.has(key)) byDay.set(key, [])
+			byDay.get(key).push(it)
+		}
+
+		const days = []
+		for (let i = 0; i < 42; i += 1) {
+			const d = new Date(startDate)
+			d.setDate(startDate.getDate() + i)
+			const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+			const items = byDay.get(key) || []
+			days.push({
+				key,
+				date: d,
+				dayNumber: d.getDate(),
+				isCurrentMonth: d.getMonth() === interviewCalendarMonth.getMonth(),
+				interviewsCount: items.length,
+				offerTitles: items.map((x) => x.title),
+			})
+		}
+
+		return days
+	}, [interviewCalendarMonth, dashboardUpcomingInterviews])
+
+	const dashboardOverview = useMemo(() => {
+		const connectedHours = Number(dashboardStats?.sessions?.connectedHours) || 0
+		const sessionsCount = Number(dashboardStats?.sessions?.count) || 0
+		const frequentHours = Array.isArray(dashboardStats?.sessions?.mostFrequentLoginHours) ? dashboardStats.sessions.mostFrequentLoginHours : []
+		const topHour = frequentHours[0] || null
+		const topHourCount = Number(topHour?.count) || 0
+		const topHourLabel = topHour ? `${String(topHour.hour).padStart(2, '0')}h (${topHourCount})` : '—'
+
+		const loginHourCounts = Array.isArray(dashboardStats?.sessions?.loginHourCounts) ? dashboardStats.sessions.loginHourCounts : []
+		const maxHourlyCount = Math.max(1, ...loginHourCounts.map((n) => (Number.isFinite(n) ? n : 0)))
+
+		const appliedCount = Number(dashboardStats?.offers?.appliedCount) || 0
+		const interviewsCount = Number(dashboardStats?.offers?.interviewsCount) || 0
+		const appliedWithInterviewCount = Number(dashboardStats?.offers?.appliedWithInterviewCount) || 0
+
+		const avgHoursPerSession = sessionsCount > 0 ? connectedHours / sessionsCount : 0
+		const interviewRate = appliedCount > 0 ? Math.round((interviewsCount / appliedCount) * 100) : 0
+		const conversionRate = appliedCount > 0 ? Math.round((appliedWithInterviewCount / appliedCount) * 100) : 0
+
+		const activityTargetHours = 60
+		const sessionsTarget = 40
+		const activityProgress = clamp(Math.round((connectedHours / activityTargetHours) * 100), 0, 100)
+		const sessionsProgress = clamp(Math.round((sessionsCount / sessionsTarget) * 100), 0, 100)
+		const topHourProgress = clamp(Math.round((topHourCount / maxHourlyCount) * 100), 0, 100)
+
+		const pipelineMax = Math.max(1, appliedCount, interviewsCount, appliedWithInterviewCount)
+		const appliedProgress = clamp(Math.round((appliedCount / pipelineMax) * 100), 0, 100)
+		const interviewsProgress = clamp(Math.round((interviewsCount / pipelineMax) * 100), 0, 100)
+		const conversionProgress = clamp(Math.round((appliedWithInterviewCount / pipelineMax) * 100), 0, 100)
+
+		return {
+			connectedHours,
+			sessionsCount,
+			topHourLabel,
+			avgHoursPerSession,
+			activityProgress,
+			sessionsProgress,
+			topHourProgress,
+			appliedCount,
+			interviewsCount,
+			appliedWithInterviewCount,
+			interviewRate,
+			conversionRate,
+			appliedProgress,
+			interviewsProgress,
+			conversionProgress,
+		}
+	}, [dashboardStats])
+
 	useEffect(() => {
 		if (selectedView !== 'notifications') return
 		const candidateId = candidate?.id || candidate?._id
@@ -1156,6 +1263,10 @@ function DashboardCand() {
 		localStorage.removeItem('airCandidateSessionId')
 		setCandidateSessionId('')
 		navigate('/connecter')
+	}
+
+	const handleRefreshPage = () => {
+		window.location.reload()
 	}
 
 	const handleAnalyzeCv = async () => {
@@ -1288,6 +1399,7 @@ function DashboardCand() {
 	}, [candidate])
 
 	const candidateName = candidate ? `${candidate.firstName} ${candidate.lastName}` : 'Candidat'
+	const chatUserLabel = String(candidateName || '').trim() || 'Vous'
 	const candidateTitle = candidate?.professionalTitle || "À l'écoute d'opportunités"
 
 	const formattedTime = useMemo(() => {
@@ -1494,6 +1606,14 @@ function DashboardCand() {
 									<span className='h-2 w-2 animate-pulse rounded-full bg-[#06d5e0]' />
 									{formattedTime}
 								</span>
+								<button
+									type='button'
+									onClick={handleRefreshPage}
+									className='rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50'
+									title='Rafraîchir la page'
+								>
+									Rafraîchir
+								</button>
 								<button
 									type='button'
 									onClick={() => setSelectedView('candidatures')}
@@ -2365,33 +2485,87 @@ function DashboardCand() {
 
 								{!dashboardLoading && !dashboardError && dashboardStats ? (
 									<div className='mt-5 space-y-4'>
-										<div className='grid gap-4 md:grid-cols-3'>
-											<div className='rounded-2xl border border-slate-200 bg-slate-50 p-4'>
-												<p className='text-[11px] font-black tracking-[0.12em] text-slate-500'>TEMPS CONNECTÉ (30J)</p>
-												<p className='mt-2 text-3xl font-black text-slate-900'>{dashboardStats?.sessions?.connectedHours ?? 0} h</p>
-											</div>
-											<div className='rounded-2xl border border-slate-200 bg-slate-50 p-4'>
-												<p className='text-[11px] font-black tracking-[0.12em] text-slate-500'>NOMBRE DE CONNEXIONS</p>
-												<p className='mt-2 text-3xl font-black text-slate-900'>{dashboardStats?.sessions?.count ?? 0}</p>
-											</div>
-											<div className='rounded-2xl border border-slate-200 bg-slate-50 p-4'>
-												<p className='text-[11px] font-black tracking-[0.12em] text-slate-500'>HEURES FRÉQUENTES</p>
-												<p className='mt-2 text-sm font-semibold text-slate-700'>{formatHoursList(dashboardStats?.sessions?.mostFrequentLoginHours)}</p>
-											</div>
-										</div>
+										<div className='grid gap-4 lg:grid-cols-2'>
+											<div className='rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-4'>
+												<div className='flex items-center justify-between gap-2'>
+													<p className='text-[11px] font-black tracking-[0.12em] text-slate-600'>ACTIVITÉ CANDIDAT (30J)</p>
+													<span className='rounded-full bg-cyan-100 px-2.5 py-1 text-[10px] font-black tracking-wide text-cyan-800'>Score {dashboardOverview.activityProgress}%</span>
+												</div>
 
-										<div className='grid gap-4 md:grid-cols-3'>
-											<div className='rounded-2xl border border-slate-200 bg-white p-4'>
-												<p className='text-[11px] font-black tracking-[0.12em] text-slate-500'>OFFRES POSTULÉES</p>
-												<p className='mt-2 text-3xl font-black text-slate-900'>{dashboardStats?.offers?.appliedCount ?? 0}</p>
+												<div className='mt-4 space-y-3'>
+													<div>
+														<div className='flex items-center justify-between text-sm font-semibold text-slate-700'>
+															<span>TEMPS CONNECTÉ (30J)</span>
+															<span className='font-black text-[#0d355b]'>{dashboardOverview.connectedHours} h</span>
+														</div>
+														<div className='mt-1 h-2 rounded-full bg-slate-200'>
+															<div className='h-full rounded-full bg-[#0a5f88]' style={{ width: `${dashboardOverview.activityProgress}%` }} />
+														</div>
+													</div>
+
+													<div>
+														<div className='flex items-center justify-between text-sm font-semibold text-slate-700'>
+															<span>NOMBRE DE CONNEXIONS</span>
+															<span className='font-black text-[#0d355b]'>{dashboardOverview.sessionsCount}</span>
+														</div>
+														<div className='mt-1 h-2 rounded-full bg-slate-200'>
+															<div className='h-full rounded-full bg-[#06d5e0]' style={{ width: `${dashboardOverview.sessionsProgress}%` }} />
+														</div>
+													</div>
+
+													<div>
+														<div className='flex items-center justify-between text-sm font-semibold text-slate-700'>
+															<span>HEURES FRÉQUENTES (PIC)</span>
+															<span className='font-black text-[#0d355b]'>{dashboardOverview.topHourLabel}</span>
+														</div>
+														<div className='mt-1 h-2 rounded-full bg-slate-200'>
+															<div className='h-full rounded-full bg-[#165dff]' style={{ width: `${dashboardOverview.topHourProgress}%` }} />
+														</div>
+													</div>
+												</div>
+
+												<p className='mt-3 text-xs font-semibold text-slate-500'>Moyenne: {dashboardOverview.avgHoursPerSession.toFixed(1)} h par connexion</p>
 											</div>
-											<div className='rounded-2xl border border-slate-200 bg-white p-4'>
-												<p className='text-[11px] font-black tracking-[0.12em] text-slate-500'>ENTRETIENS</p>
-												<p className='mt-2 text-3xl font-black text-slate-900'>{dashboardStats?.offers?.interviewsCount ?? 0}</p>
-											</div>
-											<div className='rounded-2xl border border-slate-200 bg-white p-4'>
-												<p className='text-[11px] font-black tracking-[0.12em] text-slate-500'>POSTULÉ + ENTRETIEN</p>
-												<p className='mt-2 text-3xl font-black text-slate-900'>{dashboardStats?.offers?.appliedWithInterviewCount ?? 0}</p>
+
+											<div className='rounded-2xl border border-slate-200 bg-gradient-to-br from-cyan-50 to-white p-4'>
+												<div className='flex items-center justify-between gap-2'>
+													<p className='text-[11px] font-black tracking-[0.12em] text-slate-600'>PIPELINE CANDIDATURE</p>
+													<span className='rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-black tracking-wide text-emerald-800'>Taux entretien {dashboardOverview.interviewRate}%</span>
+												</div>
+
+												<div className='mt-4 space-y-3'>
+													<div>
+														<div className='flex items-center justify-between text-sm font-semibold text-slate-700'>
+															<span>OFFRES POSTULÉES</span>
+															<span className='font-black text-[#0d355b]'>{dashboardOverview.appliedCount}</span>
+														</div>
+														<div className='mt-1 h-2 rounded-full bg-slate-200'>
+															<div className='h-full rounded-full bg-[#0f2742]' style={{ width: `${dashboardOverview.appliedProgress}%` }} />
+														</div>
+													</div>
+
+													<div>
+														<div className='flex items-center justify-between text-sm font-semibold text-slate-700'>
+															<span>ENTRETIENS</span>
+															<span className='font-black text-[#0d355b]'>{dashboardOverview.interviewsCount}</span>
+														</div>
+														<div className='mt-1 h-2 rounded-full bg-slate-200'>
+															<div className='h-full rounded-full bg-[#06d5e0]' style={{ width: `${dashboardOverview.interviewsProgress}%` }} />
+														</div>
+													</div>
+
+													<div>
+														<div className='flex items-center justify-between text-sm font-semibold text-slate-700'>
+															<span>POSTULÉ + ENTRETIEN</span>
+															<span className='font-black text-[#0d355b]'>{dashboardOverview.appliedWithInterviewCount}</span>
+														</div>
+														<div className='mt-1 h-2 rounded-full bg-slate-200'>
+															<div className='h-full rounded-full bg-emerald-500' style={{ width: `${dashboardOverview.conversionProgress}%` }} />
+														</div>
+													</div>
+												</div>
+
+												<p className='mt-3 text-xs font-semibold text-slate-500'>Conversion postulé→entretien: {dashboardOverview.conversionRate}%</p>
 											</div>
 										</div>
 
@@ -2470,16 +2644,60 @@ function DashboardCand() {
 											</div>
 											<div className='rounded-2xl border border-slate-200 bg-white p-4'>
 												<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>PROCHAINS ENTRETIENS</p>
-												{(dashboardStats?.offers?.upcomingInterviews || []).length === 0 ? (
+												{dashboardUpcomingInterviews.length === 0 ? (
 													<p className='mt-3 text-sm text-slate-600'>Aucun entretien à venir.</p>
 												) : (
-													<div className='mt-3 space-y-2'>
-														{dashboardStats.offers.upcomingInterviews.map((i) => (
-															<div key={i.interviewId} className='rounded-xl border border-slate-200 bg-slate-50 px-3 py-2'>
-																<p className='text-sm font-semibold text-slate-800'>{i.title}</p>
-																<p className='text-xs font-semibold text-slate-500'>{i.scheduledAt ? new Date(i.scheduledAt).toLocaleString() : '—'}</p>
-															</div>
-														))}
+													<div className='mt-3 space-y-3'>
+														<div className='flex items-center justify-between gap-2'>
+															<button
+																type='button'
+																onClick={() => setInterviewCalendarMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
+																className='rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100'
+															>
+																←
+															</button>
+															<p className='text-xs font-black uppercase tracking-[0.12em] text-slate-600'>{interviewCalendarTitle}</p>
+															<button
+																type='button'
+																onClick={() => setInterviewCalendarMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+																className='rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100'
+															>
+																→
+															</button>
+														</div>
+
+														<div className='grid grid-cols-7 gap-1 text-center text-[10px] font-black uppercase tracking-[0.08em] text-slate-500'>
+															{['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map((label) => (
+																<div key={label} className='py-1'>{label}</div>
+															))}
+														</div>
+
+														<div className='grid grid-cols-7 gap-1'>
+															{interviewCalendarDays.map((day) => {
+																const hasInterview = day.interviewsCount > 0
+																const tooltip = day.offerTitles.length ? `Offre: ${day.offerTitles.join(' | ')}` : ''
+																return (
+																	<div key={day.key} className='relative group'>
+																		<div
+																			title={tooltip}
+																			className={[
+																				'flex h-10 items-center justify-center rounded-lg border text-xs font-semibold transition',
+																				day.isCurrentMonth ? 'border-slate-200' : 'border-slate-100 text-slate-300',
+																				hasInterview ? 'border-cyan-300 bg-cyan-100 text-cyan-900 ring-1 ring-cyan-200' : 'bg-white text-slate-700',
+																			].join(' ')}
+																		>
+																			{day.dayNumber}
+																			{hasInterview ? <span className='ml-1 inline-block h-1.5 w-1.5 rounded-full bg-cyan-700' /> : null}
+																		</div>
+																		{hasInterview ? (
+																			<div className='pointer-events-none absolute left-1/2 top-full z-20 mt-1 hidden w-max max-w-[220px] -translate-x-1/2 rounded-md border border-slate-200 bg-slate-900 px-2 py-1 text-[10px] font-semibold text-white shadow-lg group-hover:block'>
+																				{day.offerTitles.join(' | ')}
+																			</div>
+																		) : null}
+																	</div>
+																)
+															})}
+														</div>
 													</div>
 												)}
 											</div>
@@ -2546,16 +2764,35 @@ function DashboardCand() {
 								<div className='mt-5 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]'>
 									<div className='rounded-2xl border border-slate-200 bg-slate-50 p-4'>
 										<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>CONVERSATION</p>
-										<div className='mt-3 max-h-[56vh] space-y-3 overflow-y-auto pr-1'>
-											{offerHelpMessages.map((m, idx) => (
-												<div
-													key={`offer-help-msg-${idx}`}
-													className={`rounded-2xl border p-4 ${m.role === 'user' ? 'border-cyan-200 bg-white' : 'border-slate-200 bg-white'}`}
-												>
-													<p className='text-xs font-black tracking-[0.12em] text-slate-500'>{m.role === 'user' ? 'VOUS' : 'ASSISTANT IA'}</p>
-													<p className='mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700'>{m.content}</p>
-												</div>
-											))}
+										<div className='mt-3 max-h-[56vh] overflow-y-auto pr-1'>
+											<div className='space-y-3'>
+												{offerHelpMessages.map((m, idx) => {
+													const isUser = m.role === 'user'
+													return (
+														<div key={`offer-help-msg-${idx}`} className={`flex items-end gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
+															{!isUser ? (
+																<div className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#0f2742] text-[10px] font-black tracking-[0.08em] text-cyan-100'>AI</div>
+															) : null}
+															<div
+																className={[
+																	'max-w-[82%] rounded-2xl px-4 py-3 shadow-sm',
+																	isUser
+																		? 'rounded-br-md bg-gradient-to-r from-[#0a4a72] to-[#0a7aa2] text-white'
+																		: 'rounded-bl-md border border-slate-200 bg-white text-slate-800',
+																].join(' ')}
+															>
+																<p className={`text-[10px] font-black tracking-[0.12em] ${isUser ? 'text-cyan-100/90' : 'text-slate-500'}`}>
+																	{isUser ? chatUserLabel : 'ASSISTANT IA'}
+																</p>
+																<p className={`mt-1.5 whitespace-pre-wrap text-sm leading-6 ${isUser ? 'text-white' : 'text-slate-700'}`}>{m.content}</p>
+															</div>
+															{isUser ? (
+																<div className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cyan-100 text-[10px] font-black tracking-[0.08em] text-[#0a5f88]'>{candidateInitials}</div>
+															) : null}
+														</div>
+													)
+												})}
+											</div>
 										</div>
 
 										<div className='mt-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4'>
@@ -2662,13 +2899,35 @@ function DashboardCand() {
 
 								<div className='mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4'>
 									<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>CONVERSATION</p>
-									<div className='mt-3 max-h-[62vh] space-y-3 overflow-y-auto pr-1'>
-										{assistantMessages.map((m, idx) => (
-											<div key={`assistant-msg-${idx}`} className={`rounded-2xl border p-4 ${m.role === 'user' ? 'border-cyan-200 bg-white' : 'border-slate-200 bg-white'}`}>
-												<p className='text-xs font-black tracking-[0.12em] text-slate-500'>{m.role === 'user' ? 'VOUS' : 'ASSISTANT IA'}</p>
-												<p className='mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700'>{m.content}</p>
-											</div>
-										))}
+									<div className='mt-3 max-h-[62vh] overflow-y-auto pr-1'>
+										<div className='space-y-3'>
+											{assistantMessages.map((m, idx) => {
+												const isUser = m.role === 'user'
+												return (
+													<div key={`assistant-msg-${idx}`} className={`flex items-end gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
+														{!isUser ? (
+															<div className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#0f2742] text-[10px] font-black tracking-[0.08em] text-cyan-100'>AI</div>
+														) : null}
+														<div
+															className={[
+																'max-w-[82%] rounded-2xl px-4 py-3 shadow-sm',
+																isUser
+																	? 'rounded-br-md bg-gradient-to-r from-[#0a4a72] to-[#0a7aa2] text-white'
+																	: 'rounded-bl-md border border-slate-200 bg-white text-slate-800',
+															].join(' ')}
+														>
+															<p className={`text-[10px] font-black tracking-[0.12em] ${isUser ? 'text-cyan-100/90' : 'text-slate-500'}`}>
+																{isUser ? chatUserLabel : 'ASSISTANT IA'}
+															</p>
+															<p className={`mt-1.5 whitespace-pre-wrap text-sm leading-6 ${isUser ? 'text-white' : 'text-slate-700'}`}>{m.content}</p>
+														</div>
+														{isUser ? (
+															<div className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cyan-100 text-[10px] font-black tracking-[0.08em] text-[#0a5f88]'>{candidateInitials}</div>
+														) : null}
+													</div>
+												)
+											})}
+										</div>
 									</div>
 
 									<div className='mt-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4'>
