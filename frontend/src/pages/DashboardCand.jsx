@@ -1247,21 +1247,37 @@ function DashboardCand() {
 		setSettingsCvError('')
 		setSettingsCvMessage('')
 		const candidateId = candidate?.id || candidate?._id
-		if (!candidateId || !activeCvId) {
-			setSettingsCvError('Aucun CV actif trouvé.')
+		if (!candidateId) {
+			setSettingsCvError('Candidat introuvable.')
 			return
 		}
-		try {
-			const res = await fetch(`${API_BASE}/cv/by-id/${activeCvId}?candidateId=${encodeURIComponent(candidateId)}`)
-			const data = await res.json().catch(() => ({}))
-			if (!res.ok || !data?.success) throw new Error(data?.message || 'Impossible de charger le CV.')
-			const cv = data?.cv || null
-			if (!cv) throw new Error('CV introuvable.')
-			saveCvDraft(candidateId, { personal: cv?.personal || {}, content: cv?.content || {} })
-			navigate('/EspaceCandidat/construire/etape-1')
-		} catch (e) {
-			setSettingsCvError(String(e?.message || 'Erreur'))
+
+		// If the active CV is a generated one, we can prefill the builder from it.
+		if (activeCvId && activeCvMeta?.source === 'generated') {
+			try {
+				const res = await fetch(`${API_BASE}/cv/by-id/${activeCvId}?candidateId=${encodeURIComponent(candidateId)}`)
+				const data = await res.json().catch(() => ({}))
+				if (!res.ok || !data?.success) throw new Error(data?.message || 'Impossible de charger le CV.')
+				const cv = data?.cv || null
+				if (!cv) throw new Error('CV introuvable.')
+
+				const personal = cv?.personal || null
+				const content = cv?.content || null
+				const hasStructuredData =
+					(personal && Object.keys(personal).length > 0) || (content && Object.keys(content).length > 0)
+
+				if (hasStructuredData) {
+					saveCvDraft(candidateId, { personal: personal || {}, content: content || {} })
+				}
+				navigate('/EspaceCandidat/construire/etape-1')
+			} catch (e) {
+				setSettingsCvError(String(e?.message || 'Erreur'))
+			}
+			return
 		}
+
+		// For uploaded CVs (or if there is no active CV yet), we still allow creating a new generated CV via the builder.
+		navigate('/EspaceCandidat/construire/etape-1')
 	}
 
 	const candidateInitials = useMemo(() => {
@@ -2239,21 +2255,19 @@ function DashboardCand() {
 									</div>
 
 									<div className='space-y-5'>
-										{activeCvMeta?.source === 'generated' ? (
-											<div className='rounded-2xl border border-slate-200 bg-white p-5'>
-												<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>CV GÉNÉRÉ</p>
-												<p className='mt-2 text-sm text-slate-600'>Modifiez vos informations puis régénérez un nouveau CV (il sera ajouté à l’historique).</p>
-												<div className='mt-4'>
-													<button
-														type='button'
-														onClick={handleEditActiveGeneratedCv}
-														className='rounded-xl bg-[#001d3e] px-5 py-2.5 text-sm font-semibold text-white transition hover:opacity-95'
-													>
-														Modifier et générer un nouveau CV
-													</button>
-												</div>
+										<div className='rounded-2xl border border-slate-200 bg-white p-5'>
+											<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>CV GÉNÉRÉ</p>
+											<p className='mt-2 text-sm text-slate-600'>Modifiez vos informations puis régénérez un nouveau CV (il sera ajouté à l’historique).</p>
+											<div className='mt-4'>
+												<button
+													type='button'
+													onClick={handleEditActiveGeneratedCv}
+													className='rounded-xl bg-[#001d3e] px-5 py-2.5 text-sm font-semibold text-white transition hover:opacity-95'
+												>
+													Modifier et générer un nouveau CV
+												</button>
 											</div>
-										) : null}
+										</div>
 										<div className='rounded-2xl border border-slate-200 bg-white p-5'>
 											<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>CHANGER DE CV</p>
 											{settingsCvError ? (
