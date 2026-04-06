@@ -24,6 +24,8 @@ Cela lance :
 ## Commandes utiles
 
 ```bash
+pour active notre model il faut mettre cette commande 
+"Set-Location e:\AIR\analyse-cv; .\.venv\Scripts\python.exe -m uvicorn api:app --host 127.0.0.1 --port 8001"
 npm run dev:frontend
 npm run dev:backend
 npm run build
