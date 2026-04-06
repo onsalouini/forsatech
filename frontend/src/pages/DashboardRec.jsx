@@ -940,6 +940,23 @@ function DashboardRec() {
 		return 'border-slate-200 bg-slate-50 text-slate-700'
 	}
 
+	const extractionLabelMap = {
+		Name: 'Nom',
+		Email: 'Email',
+		Phone: 'Telephone',
+		Phone_Number: 'Telephone',
+		Designation: 'Poste',
+		Years_of_Experience: 'Annees d experience',
+		Skills: 'Competences',
+		Graduation_Year: 'Annee diplome',
+		Companies_worked_at: 'Entreprises',
+		College_Name: 'Etablissement',
+		LinkedIn: 'LinkedIn',
+		GitHub: 'GitHub',
+	}
+
+	const getExtractionLabel = (label) => extractionLabelMap[label] || String(label || '').replace(/_/g, ' ')
+
 	const handleMenuClick = (itemKey) => {
 		if (itemKey === 'dashboard' || itemKey === 'offers' || itemKey === 'interviews' || itemKey === 'candidates' || itemKey === 'company' || itemKey === 'settings') {
 			setSelectedView(itemKey)
@@ -1361,6 +1378,17 @@ function DashboardRec() {
 														const cand = candidacy?.candidateId || {}
 														const candidateId = typeof candidacy?.candidateId === 'string' ? candidacy?.candidateId : candidacy?.candidateId?._id
 														const cvInfo = candidateId ? cvByCandidate[candidateId] : null
+																		const extraction = candidateId ? cvExtractionByCandidate[candidateId] : null
+																		const extractionEntries = extraction?.entities
+																			? Object.entries(extraction.entities).filter(([, values]) => {
+																				if (!Array.isArray(values)) return Boolean(values)
+																				return values.length > 0
+																			})
+																			: []
+																		const extractionValuesCount = extractionEntries.reduce((acc, [, values]) => {
+																			if (Array.isArray(values)) return acc + values.length
+																			return acc + 1
+																		}, 0)
 														const fullName = `${cand.firstName || ''} ${cand.lastName || ''}`.trim() || 'Candidat'
 														const appliedAt = candidacy?.createdAt ? new Date(candidacy.createdAt).toLocaleDateString() : 'N/A'
 														return (
@@ -1413,35 +1441,90 @@ function DashboardRec() {
 																) : (
 																	<p className='mt-2 text-xs text-[#8aa3b9]'>CV non disponible</p>
 																)}
-																{cvInfo?.hasCv && cvDetailsOpenByCandidate[candidateId] ? (
-																	<div className='mt-2 rounded-md border border-cyan-100 bg-cyan-50/50 p-2 text-xs text-[#2c5f84]'>
-																		<p><span className='font-semibold'>Nom du fichier:</span> {cvInfo.fileName || 'CV'}</p>
-																		<p><span className='font-semibold'>Type:</span> {cvInfo.source === 'generated' ? 'CV Genere' : 'CV Uploade'}</p>
-																		<p><span className='font-semibold'>Cree le:</span> {cvInfo.createdAt ? new Date(cvInfo.createdAt).toLocaleDateString() : 'N/A'}</p>
-																		<p><span className='font-semibold'>Mis a jour le:</span> {cvInfo.updatedAt ? new Date(cvInfo.updatedAt).toLocaleDateString() : 'N/A'}</p>
-																		<div className='mt-2 rounded-md border border-cyan-100 bg-white p-2'>
-																			<p className='text-xs font-semibold text-[#103b62]'>Extraction (modèle)</p>
-																			{cvExtractionLoadingByCandidate[candidateId] ? (
-																				<p className='mt-1 text-xs text-[#587a99]'>Analyse en cours...</p>
-																			) : cvExtractionErrorByCandidate[candidateId] ? (
-																				<p className='mt-1 text-xs text-red-700'>{cvExtractionErrorByCandidate[candidateId]}</p>
-																			) : cvExtractionByCandidate[candidateId]?.entities ? (
-																				<div className='mt-2 space-y-1'>
-																					{cvExtractionByCandidate[candidateId]?.translation ? (
-																						<p className='text-[11px] text-[#587a99]'>Traduction: {String(cvExtractionByCandidate[candidateId].translation)}</p>
-																					) : null}
-																					{Object.entries(cvExtractionByCandidate[candidateId].entities).map(([label, values]) => (
-																						<div key={label} className='text-xs'>
-																							<p className='font-semibold text-[#103b62]'>{label}</p>
-																							<p className='text-[#2c5f84]'>{Array.isArray(values) ? values.join(' | ') : String(values || '')}</p>
+																				{cvInfo?.hasCv && cvDetailsOpenByCandidate[candidateId] ? (
+																					<div className='mt-3 overflow-hidden rounded-xl border border-[#cce6f6] bg-gradient-to-br from-[#f7fcff] via-[#eef8ff] to-[#f4fbff]'>
+																						<div className='border-b border-[#d9edf9] bg-white/60 px-3 py-2.5'>
+																							<div className='flex flex-wrap items-center justify-between gap-2'>
+																								<div>
+																									<p className='text-[11px] font-bold uppercase tracking-wide text-[#4c7b9e]'>Analyse CV</p>
+																									<p className='text-sm font-black text-[#0d3d63]'>{cvInfo.fileName || 'CV'}</p>
+																								</div>
+																								<div className='flex flex-wrap gap-1.5'>
+																									<span className='rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[11px] font-semibold text-cyan-700'>
+																										{cvInfo.source === 'generated' ? 'CV Genere' : 'CV Uploade'}
+																									</span>
+																									<span className='rounded-full border border-[#d9eaf7] bg-white px-2 py-0.5 text-[11px] font-semibold text-[#4f7191]'>
+																										Maj: {cvInfo.updatedAt ? new Date(cvInfo.updatedAt).toLocaleDateString() : 'N/A'}
+																									</span>
+																								</div>
+																							</div>
 																						</div>
-																					))}
-																				</div>
-																			) : (
-																				<p className='mt-1 text-xs text-[#587a99]'>Cliquez sur Detail CV pour lancer l\'analyse.</p>
-																			)}
-																		</div>
-																	</div>
+
+																						<div className='grid gap-3 p-3 lg:grid-cols-[220px_1fr]'>
+																							<div className='space-y-2 rounded-lg border border-[#d5e9f8] bg-white p-2.5'>
+																								<p className='text-[11px] font-bold uppercase tracking-wide text-[#5b7f9d]'>Meta</p>
+																								<p className='text-[12px] text-[#3e6282]'>Cree: <span className='font-semibold'>{cvInfo.createdAt ? new Date(cvInfo.createdAt).toLocaleDateString() : 'N/A'}</span></p>
+																								<p className='text-[12px] text-[#3e6282]'>Mise a jour: <span className='font-semibold'>{cvInfo.updatedAt ? new Date(cvInfo.updatedAt).toLocaleDateString() : 'N/A'}</span></p>
+																								<p className='text-[12px] text-[#3e6282]'>Source: <span className='font-semibold'>{cvInfo.source === 'generated' ? 'Generation' : 'Upload'}</span></p>
+																								{extraction?.translation ? (
+																									<p className='text-[12px] text-[#3e6282]'>Traduction: <span className='font-semibold'>{String(extraction.translation)}</span></p>
+																								) : null}
+																							</div>
+
+																							<div className='rounded-lg border border-[#d5e9f8] bg-white p-2.5'>
+																								<div className='mb-2 flex flex-wrap items-center justify-between gap-2'>
+																									<p className='text-[11px] font-bold uppercase tracking-wide text-[#5b7f9d]'>Extraction (modele)</p>
+																									{extractionEntries.length > 0 ? (
+																										<span className='rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700'>
+																											{extractionEntries.length} blocs • {extractionValuesCount} valeurs
+																										</span>
+																									) : null}
+																								</div>
+
+																								{cvExtractionLoadingByCandidate[candidateId] ? (
+																									<div className='rounded-md border border-dashed border-cyan-200 bg-cyan-50/60 px-3 py-4 text-center text-xs font-semibold text-cyan-700'>
+																										Analyse en cours...
+																									</div>
+																								) : cvExtractionErrorByCandidate[candidateId] ? (
+																									<div className='rounded-md border border-red-200 bg-red-50 px-3 py-3 text-xs text-red-700'>
+																										{cvExtractionErrorByCandidate[candidateId]}
+																									</div>
+																								) : extractionEntries.length > 0 ? (
+																									<div className='space-y-2'>
+																										{extractionEntries.map(([label, values]) => {
+																											const normalizedValues = Array.from(
+																												new Set(
+																													(Array.isArray(values) ? values : [values])
+																														.map((item) => String(item || '').trim())
+																														.filter(Boolean)
+																												)
+																											)
+																											return (
+																												<div key={label} className='rounded-md border border-[#e1edf7] bg-[#fbfdff] p-2'>
+																													<p className='mb-1 text-xs font-bold text-[#0e3e63]'>{getExtractionLabel(label)}</p>
+																													{normalizedValues.length > 0 ? (
+																														<div className='flex flex-wrap gap-1.5'>
+																															{normalizedValues.map((value) => (
+																																<span key={`${label}-${value}`} className='rounded-full border border-[#d5e8f7] bg-white px-2 py-0.5 text-[11px] font-medium text-[#325f82]'>
+																																	{value}
+																																</span>
+																															))}
+																														</div>
+																													) : (
+																														<p className='text-xs text-[#6b89a3]'>Aucune valeur detectee.</p>
+																													)}
+																												</div>
+																											)
+																										})}
+																									</div>
+																								) : (
+																									<div className='rounded-md border border-dashed border-[#d6e8f7] bg-[#f8fcff] px-3 py-4 text-center text-xs text-[#5d7f9b]'>
+																										Clique sur Details CV pour lancer l analyse.
+																									</div>
+																								)}
+																							</div>
+																						</div>
+																					</div>
 																) : (
 																	null
 																)}
