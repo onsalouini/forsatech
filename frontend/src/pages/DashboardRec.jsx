@@ -254,9 +254,14 @@ function DashboardRec() {
 				const parts = [data?.message, data?.error, data?.hint].filter(Boolean)
 				throw new Error(parts.join(' — ') || 'Impossible d\'analyser le CV.')
 			}
+			const extractedPayload = data?.extraction && typeof data.extraction === 'object' ? data.extraction : {}
+			const storedCategories = data?.storedCategories && typeof data.storedCategories === 'object' ? data.storedCategories : null
 			setCvExtractionByCandidate((prev) => ({
 				...prev,
-				[candidateId]: data?.extraction || null,
+				[candidateId]: {
+					...extractedPayload,
+					storedCategories,
+				},
 			}))
 		} catch (error) {
 			setCvExtractionErrorByCandidate((prev) => ({
@@ -942,17 +947,37 @@ function DashboardRec() {
 
 	const extractionLabelMap = {
 		Name: 'Nom',
+		Nom: 'Nom',
 		Email: 'Email',
+		'Email Address': 'Email',
 		Phone: 'Telephone',
+		'Telephone': 'Telephone',
 		Phone_Number: 'Telephone',
+		'Phone Number': 'Telephone',
 		Designation: 'Poste',
 		Years_of_Experience: 'Annees d experience',
+		'Years of Experience': 'Annees d experience',
 		Skills: 'Competences',
+		Competences: 'Competences',
 		Graduation_Year: 'Annee diplome',
+		'Graduation Year': 'Annee diplome',
 		Companies_worked_at: 'Entreprises',
+		'Companies worked at': 'Entreprises',
 		College_Name: 'Etablissement',
+		'College Name': 'Etablissement',
 		LinkedIn: 'LinkedIn',
 		GitHub: 'GitHub',
+		Certificate: 'Certifications',
+		Certifications: 'Certifications',
+		certifications: 'Certifications',
+		yearsOfExperience: 'Annees d experience',
+		experiences: 'Experiences',
+		skills: 'Competences',
+		education: 'Formation',
+		projects: 'Projets',
+		languages: 'Langues',
+		locations: 'Localisation',
+		links: 'Liens',
 	}
 
 	const getExtractionLabel = (label) => extractionLabelMap[label] || String(label || '').replace(/_/g, ' ')
@@ -1379,12 +1404,15 @@ function DashboardRec() {
 														const candidateId = typeof candidacy?.candidateId === 'string' ? candidacy?.candidateId : candidacy?.candidateId?._id
 														const cvInfo = candidateId ? cvByCandidate[candidateId] : null
 																		const extraction = candidateId ? cvExtractionByCandidate[candidateId] : null
-																		const extractionEntries = extraction?.entities
-																			? Object.entries(extraction.entities).filter(([, values]) => {
-																				if (!Array.isArray(values)) return Boolean(values)
-																				return values.length > 0
-																			})
-																			: []
+																		const extractionSource = extraction?.entities && typeof extraction.entities === 'object'
+																			? extraction.entities
+																			: extraction?.storedCategories && typeof extraction.storedCategories === 'object'
+																				? extraction.storedCategories
+																				: {}
+																		const extractionEntries = Object.entries(extractionSource).filter(([, values]) => {
+																			if (!Array.isArray(values)) return Boolean(values)
+																			return values.length > 0
+																		})
 																		const extractionValuesCount = extractionEntries.reduce((acc, [, values]) => {
 																			if (Array.isArray(values)) return acc + values.length
 																			return acc + 1

@@ -1775,6 +1775,90 @@ function extractJsonFromText(rawText) {
   return null;
 }
 
+function normalizeEntityList(value) {
+  const base = Array.isArray(value) ? value : [value];
+  return Array.from(
+    new Set(
+      base
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function pickEntityValues(entities, keys) {
+  if (!entities || typeof entities !== 'object') return [];
+  const wanted = new Set((Array.isArray(keys) ? keys : []).map((k) => String(k || '').toLowerCase()));
+  const merged = [];
+
+  for (const [key, value] of Object.entries(entities)) {
+    const normalizedKey = String(key || '').toLowerCase();
+    if (!wanted.has(normalizedKey)) continue;
+    merged.push(...normalizeEntityList(value));
+  }
+
+  return Array.from(new Set(merged));
+}
+
+function extractCertificateMentionsFromText(text) {
+  const raw = String(text || '');
+  if (!raw.trim()) return [];
+
+  const lineMatches = raw
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter((line) => /\b(certificat|certificate|certification)\b/i.test(line));
+
+  const sentenceMatches = [];
+  const sentenceRegex = /([^\n.]{0,120}\b(?:certificat|certificate|certification)\b[^\n.]{0,220})/gi;
+  let match;
+  while ((match = sentenceRegex.exec(raw)) !== null) {
+    const sentence = String(match[1] || '').replace(/\s+/g, ' ').trim();
+    if (sentence) sentenceMatches.push(sentence);
+  }
+
+  const merged = normalizeEntityList([...lineMatches, ...sentenceMatches])
+    .map((item) => item.replace(/^[\-•\d\.)\s]+/, '').trim())
+    .filter((item) => item.length >= 10 && item.length <= 260);
+
+  return normalizeEntityList(merged);
+}
+
+function buildStructuredCvExtraction(extractionPayload, options = {}) {
+  const payload = extractionPayload && typeof extractionPayload === 'object' ? extractionPayload : {};
+  const entities = payload?.entities && typeof payload.entities === 'object' ? payload.entities : {};
+  const sourcePreview = String(payload?.source_preview || payload?.sourcePreview || '');
+  const fallbackText = String(options?.fallbackText || '');
+
+  const categories = {
+    names: pickEntityValues(entities, ['name', 'nom', 'full_name', 'fullname']),
+    emails: pickEntityValues(entities, ['email address', 'email', 'mail']),
+    phones: pickEntityValues(entities, ['phone', 'phone number', 'telephone', 'tel']),
+    titles: pickEntityValues(entities, ['poste', 'job title', 'title', 'position', 'professional title', 'designation']),
+    yearsOfExperience: pickEntityValues(entities, ['years of experience', 'experience years', 'experience', 'annees d experience']),
+    experiences: pickEntityValues(entities, ['companies worked at', 'work experience', 'professional experience', 'experience details']),
+    skills: pickEntityValues(entities, ['competences', 'competence', 'skills', 'skill', 'technologies']),
+    education: pickEntityValues(entities, ['education', 'formation', 'diploma', 'diplome', 'college name', 'graduation year']),
+    certifications: pickEntityValues(entities, ['certifications', 'certification', 'certificate']),
+    projects: pickEntityValues(entities, ['projects', 'project', 'projets', 'projet']),
+    languages: pickEntityValues(entities, ['languages', 'language', 'langues', 'langue']),
+    locations: pickEntityValues(entities, ['location', 'city', 'country', 'adresse', 'address']),
+    links: pickEntityValues(entities, ['linkedin', 'github', 'portfolio', 'website']),
+    summary: pickEntityValues(entities, ['summary', 'resume', 'profile', 'about']),
+  };
+
+  if (!categories.certifications.length) {
+    categories.certifications = extractCertificateMentionsFromText(`${sourcePreview}\n${fallbackText}`);
+  }
+
+  return {
+    lastExtractedAt: new Date(),
+    categories,
+    rawEntities: entities,
+    rawResponse: payload,
+  };
+}
+
 function normalizeCvSuggestionsSchema(value) {
   const obj = value && typeof value === 'object' ? value : null;
   if (!obj) {
@@ -2353,6 +2437,11 @@ app.get('/api/cv/extract/:candidateId', async (req, res) => {
       });
     }
 
+    const localCvText = await extractTextFromBuffer(fileBuffer, mimeType, fileName);
+    const extractionToStore = buildStructuredCvExtraction(data, { fallbackText: localCvText });
+    cv.extraction = extractionToStore;
+    await cv.save();
+
     return res.status(200).json({
       success: true,
       candidateId: String(candidateId),
@@ -2364,6 +2453,8 @@ app.get('/api/cv/extract/:candidateId', async (req, res) => {
         updatedAt: cv.updatedAt,
       },
       extraction: data,
+      extractionSaved: true,
+      storedCategories: extractionToStore.categories,
     });
   } catch (error) {
     const msg = String(error?.message || 'Erreur serveur');

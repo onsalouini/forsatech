@@ -136,6 +136,28 @@ const cvSchema = new mongoose.Schema(
       type: uploadedFileSchema,
       default: () => ({}),
     },
+
+    extraction: {
+      lastExtractedAt: { type: Date, default: null },
+      categories: {
+        names: { type: [String], default: [] },
+        emails: { type: [String], default: [] },
+        phones: { type: [String], default: [] },
+        titles: { type: [String], default: [] },
+        yearsOfExperience: { type: [String], default: [] },
+        experiences: { type: [String], default: [] },
+        skills: { type: [String], default: [] },
+        education: { type: [String], default: [] },
+        certifications: { type: [String], default: [] },
+        projects: { type: [String], default: [] },
+        languages: { type: [String], default: [] },
+        locations: { type: [String], default: [] },
+        links: { type: [String], default: [] },
+        summary: { type: [String], default: [] },
+      },
+      rawEntities: { type: mongoose.Schema.Types.Mixed, default: null },
+      rawResponse: { type: mongoose.Schema.Types.Mixed, default: null },
+    },
   },
   {
     timestamps: true,
