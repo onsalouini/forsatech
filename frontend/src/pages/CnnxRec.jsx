@@ -72,6 +72,7 @@ function CnnxRec() {
 			}
 
 			localStorage.setItem('airRecruiter', JSON.stringify(data.recruiter))
+			window.dispatchEvent(new Event('localStorageChange')) // ADD
 			navigate('/EspaceRecruteur')
 		} catch (error) {
 			setAuthError('Serveur indisponible. Verifiez que le backend tourne.')

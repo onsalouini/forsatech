@@ -1261,7 +1261,9 @@ function DashboardCand() {
 		}
 		localStorage.removeItem('airCandidate')
 		localStorage.removeItem('airCandidateSessionId')
+		
 		setCandidateSessionId('')
+		window.dispatchEvent(new Event('localStorageChange'))
 		navigate('/connecter')
 	}
 

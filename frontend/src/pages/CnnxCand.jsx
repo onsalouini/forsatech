@@ -83,6 +83,7 @@ function CnnxCand() {
 			localStorage.setItem('airCandidate', JSON.stringify(data.candidate))
 			if (data?.sessionId) {
 				localStorage.setItem('airCandidateSessionId', String(data.sessionId))
+				window.dispatchEvent(new Event('localStorageChange'))
 			} else {
 				localStorage.removeItem('airCandidateSessionId')
 			}
