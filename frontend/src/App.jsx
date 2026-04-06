@@ -15,6 +15,8 @@ import DashboardCand from './pages/DashboardCand.jsx'
 import ChooseRole from './pages/ChooseRole.jsx'
 import MotDePasseOublie from './pages/MotDePasseOublie.jsx'
 import './index.css';
+import ChatWidget from './components/ChatWidget';
+
 
 
 function App() {
@@ -61,7 +63,9 @@ function App() {
       
     </Routes>
     </main>
+    <ChatWidget />
     </div>
+
   )
 }
 

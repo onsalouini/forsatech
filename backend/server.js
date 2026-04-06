@@ -21,6 +21,8 @@ const Interview = require('./models/Interview');
 const Chat = require('./models/Chat');
 const CandidateSession = require('./models/CandidateSession');
 
+const DirectMessage = require('./models/DirectMessage'); 
+
 dotenv.config();
 
 const app = express();
@@ -3339,8 +3341,231 @@ app.patch('/api/notifications/:id/read', async (req, res) => {
   }
 });
 
+const { createServer } = require('http');
+const { Server } = require('socket.io');
+
+const httpServer = createServer(app);
+
+const io = new Server(httpServer, {
+  cors: { origin: 'http://localhost:5173', methods: ['GET', 'POST'] },
+});
+
+// Conversation key: sort both "role:id" strings so order never matters
+function convKey(role1, id1, role2, id2) {
+  return [`${role1}:${id1}`, `${role2}:${id2}`].sort().join('__');
+}
+
+io.on('connection', (socket) => {
+
+  socket.on('dm:join', ({ myRole, myId, otherRole, otherId }) => {
+    const key = convKey(myRole, myId, otherRole, otherId);
+    socket.join(key);
+    socket.data.key = key;
+  });
+
+  socket.on('dm:send', async ({ myRole, myId, myName, otherRole, otherId, text }) => {
+    try {
+      const key = convKey(myRole, myId, otherRole, otherId);
+      const msg = await DirectMessage.create({
+        conversationKey: key,
+        senderRole: myRole,
+        senderId: myId,
+        senderName: myName,
+        text,
+      });
+      io.to(key).emit('dm:message', {
+        _id: msg._id,
+        conversationKey: key,
+        senderRole: msg.senderRole,
+        senderId: String(msg.senderId),
+        senderName: msg.senderName,
+        text: msg.text,
+        createdAt: msg.createdAt,
+      });
+    } catch (err) {
+      socket.emit('dm:error', { message: 'Message non enregistré.' });
+    }
+  });
+});
+
+
+
+// Search users by name (cross-role)
+// GET /api/dm/search?q=john&excludeId=xxx&excludeRole=recruiter
+app.get('/api/dm/search', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const excludeId = String(req.query.excludeId || '').trim();
+    const excludeRole = String(req.query.excludeRole || '').trim();
+
+    if (!q || q.length < 1) {
+      return res.json({ success: true, results: [] });
+    }
+
+    const regex = new RegExp(q, 'i');
+    const nameFilter = { $or: [{ firstName: regex }, { lastName: regex }] };
+
+    // Search both collections in parallel
+    const [recruiters, candidates] = await Promise.all([
+      Recruiter.find(nameFilter).select('_id firstName lastName company').limit(8).lean(),
+      Candidate.find(nameFilter).select('_id firstName lastName professionalTitle').limit(8).lean(),
+    ]);
+
+    const results = [
+      ...recruiters
+        .filter((r) => !(excludeRole === 'recruiter' && String(r._id) === excludeId))
+        .map((r) => ({
+          id: String(r._id),
+          role: 'recruiter',
+          name: `${r.firstName} ${r.lastName}`,
+          subtitle: r.company || 'Recruteur',
+        })),
+      ...candidates
+        .filter((c) => !(excludeRole === 'candidate' && String(c._id) === excludeId))
+        .map((c) => ({
+          id: String(c._id),
+          role: 'candidate',
+          name: `${c.firstName} ${c.lastName}`,
+          subtitle: c.professionalTitle || 'Candidat',
+        })),
+    ];
+
+    return res.json({ success: true, results });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Load conversation history between two users
+// GET /api/dm/history?key=candidate:abc__recruiter:def
+app.get('/api/dm/history', async (req, res) => {
+  try {
+    const { key } = req.query;
+    if (!key) {
+      return res.status(400).json({ success: false, message: 'key est requis.' });
+    }
+    const messages = await DirectMessage.find({ conversationKey: key })
+      .sort({ createdAt: 1 })
+      .limit(100);
+    return res.json({ success: true, messages });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// GET /api/dm/conversations?userId=xxx&userRole=candidate
+// Returns all conversations the user has participated in, most recent first
+app.get('/api/dm/conversations', async (req, res) => {
+  try {
+    const { userId, userRole } = req.query;
+    if (!userId || !userRole) {
+      return res.status(400).json({ success: false, message: 'userId et userRole sont requis.' });
+    }
+
+    const userKey = `${userRole}:${userId}`;
+
+    // Find all distinct conversations this user is part of
+    const conversations = await DirectMessage.aggregate([
+      {
+        $match: {
+          conversationKey: { $regex: userKey, $options: 'i' },
+        },
+      },
+      {
+        $sort: { createdAt: -1 },
+      },
+      {
+        $group: {
+          _id: '$conversationKey',
+          lastMessage: { $first: '$$ROOT' },
+          unreadCount: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $ne: ['$senderId', { $toObjectId: userId }] },
+                    { $eq: ['$readAt', null] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
+      { $sort: { 'lastMessage.createdAt': -1 } },
+    ]);
+
+    // Parse the other participant's identity from the conversationKey
+    const results = conversations.map((conv) => {
+      const parts = conv._id.split('__');
+      const otherPart = parts.find((p) => !p.includes(userId));
+      const [otherRole, otherId] = (otherPart || '').split(':');
+      return {
+        conversationKey: conv._id,
+        otherRole: otherRole || '',
+        otherId: otherId || '',
+        lastMessage: {
+          text: conv.lastMessage.text,
+          senderName: conv.lastMessage.senderName,
+          senderId: String(conv.lastMessage.senderId),
+          createdAt: conv.lastMessage.createdAt,
+        },
+        unreadCount: conv.unreadCount,
+      };
+    });
+
+    // Fetch other participant names in parallel
+    const enriched = await Promise.all(
+      results.map(async (r) => {
+        try {
+          let name = 'Utilisateur';
+          let subtitle = '';
+          if (r.otherRole === 'recruiter') {
+            const rec = await Recruiter.findById(r.otherId).select('firstName lastName company').lean();
+            if (rec) { name = `${rec.firstName} ${rec.lastName}`; subtitle = rec.company || 'Recruteur'; }
+          } else if (r.otherRole === 'candidate') {
+            const cand = await Candidate.findById(r.otherId).select('firstName lastName professionalTitle').lean();
+            if (cand) { name = `${cand.firstName} ${cand.lastName}`; subtitle = cand.professionalTitle || 'Candidat'; }
+          }
+          return { ...r, otherName: name, otherSubtitle: subtitle };
+        } catch {
+          return { ...r, otherName: 'Utilisateur', otherSubtitle: '' };
+        }
+      })
+    );
+
+    return res.json({ success: true, conversations: enriched });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// PATCH /api/dm/read
+// Marks all messages in a conversation as read for a given user
+app.patch('/api/dm/read', async (req, res) => {
+  try {
+    const { conversationKey, userId } = req.body;
+    if (!conversationKey || !userId) {
+      return res.status(400).json({ success: false, message: 'conversationKey et userId sont requis.' });
+    }
+    await DirectMessage.updateMany(
+      {
+        conversationKey,
+        senderId: { $ne: userId },
+        readAt: null,
+      },
+      { $set: { readAt: new Date() } }
+    );
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 connectDB().then(() => {
-  app.listen(PORT, () => {
+  httpServer.listen(PORT, () => {
     console.log(`Backend running on http://localhost:${PORT}`);
   });
 });
