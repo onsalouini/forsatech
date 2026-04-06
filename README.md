@@ -33,3 +33,11 @@ npm start
 ## Endpoint de test API
 
 `GET http://localhost:5000/api/health`
+
+## Service Python analyse-cv
+
+Pour démarrer le service d'analyse CV (FastAPI) sur `http://127.0.0.1:8001` :
+
+```powershell
+& "e:\AIR\analyse-cv\.venv\Scripts\python.exe" -m uvicorn api:app --app-dir "e:\AIR\analyse-cv" --host 127.0.0.1 --port 8001 --reload
+```
