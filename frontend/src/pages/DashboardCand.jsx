@@ -965,6 +965,7 @@ function DashboardCand() {
 						type: job.contractType,
 						featured: false,
 						posted: job.createdAt ? new Date(job.createdAt).toLocaleDateString() : 'Récemment',
+						createdAt: job.createdAt || null,
 						salary: job.salary || 'N/A',
 						candidates: 0,
 						closes: 'N/A',
@@ -1018,7 +1019,8 @@ function DashboardCand() {
 				if (cancelled) return
 				const matchByOfferId = new Map((data?.matches || []).map((m) => [String(m.offerId), m]))
 				setJobs((prev) =>
-					prev.map((j) => {
+					prev
+						.map((j) => {
 						const m = matchByOfferId.get(String(j.id))
 						if (!m) return j
 						return {
@@ -1027,6 +1029,17 @@ function DashboardCand() {
 							cvMatch: Array.isArray(m?.keywords) ? m.keywords : j.cvMatch,
 						}
 					})
+						.sort((a, b) => {
+							const aScore = Number.isFinite(a?.matchScore) ? a.matchScore : -1
+							const bScore = Number.isFinite(b?.matchScore) ? b.matchScore : -1
+							if (bScore !== aScore) return bScore - aScore
+
+							const aTime = new Date(a?.createdAt || 0).getTime() || 0
+							const bTime = new Date(b?.createdAt || 0).getTime() || 0
+							if (bTime !== aTime) return bTime - aTime
+
+							return String(a?.title || '').localeCompare(String(b?.title || ''))
+						})
 				)
 			})
 			.catch((e) => {

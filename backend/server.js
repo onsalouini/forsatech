@@ -3233,7 +3233,14 @@ app.get('/api/offers/match/:candidateId', async (req, res) => {
         missingKeywords,
         matchedKeywords,
       };
-    });
+    })
+      .sort((a, b) => {
+        const scoreDiff = (b?.score || 0) - (a?.score || 0);
+        if (scoreDiff !== 0) return scoreDiff;
+        const semanticDiff = (b?.semanticScore || 0) - (a?.semanticScore || 0);
+        if (semanticDiff !== 0) return semanticDiff;
+        return String(a?.offerId || '').localeCompare(String(b?.offerId || ''));
+      });
 
     return res.status(200).json({ success: true, matches });
   } catch (error) {
