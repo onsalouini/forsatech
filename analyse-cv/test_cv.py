@@ -1,10 +1,13 @@
+import os
 import sys
 import re
+import html
 import spacy
 import argparse
 from pathlib import Path
 
 MODEL_PATH = (Path(__file__).resolve().parent / "model_trf" / "model-best").as_posix()
+NLP_MAX_CHARS_DEFAULT = 12000
 
 # ---------------------------------------------------------------------------
 # Rule-based post-processing to complement the NER model
@@ -202,8 +205,48 @@ def read_plain_text(cv_path):
         return f.read()
 
 
+def html_to_text(raw_html):
+    text = raw_html or ""
+    # Remove non-content blocks that bloat transformer input.
+    text = re.sub(r"(?is)<(script|style|noscript).*?>.*?</\\1>", " ", text)
+    text = re.sub(r"(?is)<!--.*?-->", " ", text)
+    text = re.sub(r"(?is)<[^>]+>", " ", text)
+    text = html.unescape(text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def parse_max_chars_from_env():
+    raw = str(os.getenv("CV_NLP_MAX_CHARS", NLP_MAX_CHARS_DEFAULT)).strip()
+    try:
+        value = int(raw)
+    except Exception:
+        return NLP_MAX_CHARS_DEFAULT
+    return max(2000, min(60000, value))
+
+
+def prepare_text_for_nlp(text, max_chars=None):
+    normalized = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not normalized:
+        return "", "empty"
+
+    limit = max_chars if isinstance(max_chars, int) and max_chars > 0 else parse_max_chars_from_env()
+    if len(normalized) <= limit:
+        return normalized, "none"
+
+    # Cut on a word boundary to reduce noisy partial tokens.
+    cut = normalized.rfind(" ", 0, limit)
+    if cut < int(limit * 0.7):
+        cut = limit
+    clipped = normalized[:cut].strip()
+    return clipped, f"truncated_to_{len(clipped)}_chars"
+
+
 def read_file(cv_path):
     lower = cv_path.lower()
+    if lower.endswith((".html", ".htm")):
+        return html_to_text(read_plain_text(cv_path))
+
     # Use Tika for rich formats (pdf/docx/pptx/xlsx/etc.).
     if lower.endswith((
         ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".odt", ".rtf"
@@ -238,6 +281,7 @@ def translate_text_if_needed(text, enabled, target_lang="en"):
 def extract_entities(cv_path, translate=False, target_lang="en"):
     source_text = read_file(cv_path)
     nlp_text, translation_info = translate_text_if_needed(source_text, translate, target_lang)
+    nlp_text, trim_info = prepare_text_for_nlp(nlp_text)
 
     nlp = spacy.load(MODEL_PATH)
     doc = nlp(nlp_text)
@@ -257,6 +301,7 @@ def extract_entities(cv_path, translate=False, target_lang="en"):
     print(f"\n{'='*60}")
     print(f" Entités extraites du CV : {cv_path}")
     print(f" Prétraitement texte : {translation_info}")
+    print(f" Taille texte NLP : {trim_info}")
     print(f"{'='*60}\n")
 
     if not all_entities:

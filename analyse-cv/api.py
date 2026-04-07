@@ -5,7 +5,7 @@ import spacy
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from test_cv import clean_entity, read_file, rule_based_extras, translate_text_if_needed
+from test_cv import clean_entity, prepare_text_for_nlp, read_file, rule_based_extras, translate_text_if_needed
 
 app = FastAPI(title="CV Extractor API")
 
@@ -53,6 +53,9 @@ async def extract(
         nlp_text, translation_info = translate_text_if_needed(
             source_text, translate, target_lang
         )
+        nlp_text, trim_info = prepare_text_for_nlp(nlp_text)
+        if not nlp_text:
+            raise HTTPException(status_code=400, detail="Texte exploitable vide après prétraitement.")
 
         nlp = get_nlp()
         doc = nlp(nlp_text)
@@ -86,12 +89,25 @@ async def extract(
         return {
             "status": "ok",
             "translation": translation_info,
+            "nlp_trim": trim_info,
             "source_preview": source_text[:700],
             "entities": grouped,
         }
 
     except HTTPException:
         raise
+    except RuntimeError as exc:
+        msg = str(exc)
+        low = msg.lower()
+        if "not enough memory" in low or "alloc_cpu" in low or "out of memory" in low:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Mémoire insuffisante pendant l'analyse du CV. "
+                    "Réessayez avec un CV plus court/texte nettoyé ou augmentez la RAM disponible."
+                ),
+            )
+        raise HTTPException(status_code=500, detail=msg)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     finally:

@@ -70,7 +70,7 @@ const LineAreaChart = ({ data, height = 140 }) => {
 							{xy[0].label}
 						</text>
 						<text x={width - padding.right} y={height - 8} textAnchor='end' fontSize='10' fill='#64748b'>
-							{xy.at(-1)?.label || ''}
+							{xy[xy.length - 1].label}
 						</text>
 					</>
 				) : null}
@@ -79,44 +79,9 @@ const LineAreaChart = ({ data, height = 140 }) => {
 	)
 }
 
-const BarChart = ({ values, labels, height = 140 }) => {
-	const width = 560
-	const padding = { top: 12, right: 12, bottom: 28, left: 28 }
-	const v = Array.isArray(values) ? values.map((x) => (Number.isFinite(x) ? x : 0)) : []
-	const maxVal = Math.max(1, ...v)
-	const innerW = width - padding.left - padding.right
-	const innerH = height - padding.top - padding.bottom
-	const barW = v.length ? innerW / v.length : innerW
-
-	return (
-		<div className='w-full overflow-x-auto'>
-			<svg viewBox={`0 0 ${width} ${height}`} className='w-full min-w-[520px]'>
-				<line x1={padding.left} y1={padding.top + innerH} x2={width - padding.right} y2={padding.top + innerH} stroke='#e2e8f0' strokeWidth='1' />
-				{v.map((val, idx) => {
-					const h = (val / maxVal) * innerH
-					const x = padding.left + idx * barW + barW * 0.15
-					const y = padding.top + innerH - h
-					const w = barW * 0.7
-					const label = Array.isArray(labels) ? labels[idx] : String(idx)
-					return (
-						<g key={`bar-${label}`}>
-							<rect x={x} y={y} width={w} height={h} rx='4' fill={val > 0 ? '#06d5e0' : '#cbd5e1'} opacity={val > 0 ? 0.9 : 0.55} />
-							{idx % 3 === 0 ? (
-								<text x={x + w / 2} y={height - 10} textAnchor='middle' fontSize='10' fill='#64748b'>
-									{label}
-								</text>
-							) : null}
-						</g>
-					)
-				})}
-			</svg>
-		</div>
-	)
-}
-
 const DonutChart = ({ segments, size = 160 }) => {
 	const s = Array.isArray(segments) ? segments : []
-	const total = s.reduce((acc, x) => acc + (Number.isFinite(x?.value) ? x.value : 0), 0) || 1
+	const total = Math.max(1, s.reduce((acc, seg) => acc + (Number.isFinite(seg?.value) ? seg.value : 0), 0))
 	const cx = size / 2
 	const cy = size / 2
 	const r = size * 0.36
@@ -151,6 +116,28 @@ const DonutChart = ({ segments, size = 160 }) => {
 				)
 			})}
 		</svg>
+	)
+}
+
+const BarChart = ({ values, labels, height = 160 }) => {
+	const list = Array.isArray(values) ? values : []
+	const max = Math.max(1, ...list.map((v) => (Number.isFinite(v) ? v : 0)))
+
+	return (
+		<div className='w-full overflow-x-auto'>
+			<div className='flex min-w-[680px] items-end gap-1 rounded-xl border border-slate-200 bg-slate-50 px-2 py-3' style={{ height }}>
+				{list.map((v, i) => {
+					const safe = Number.isFinite(v) ? v : 0
+					const h = Math.max(4, Math.round((safe / max) * (height - 46)))
+					return (
+						<div key={`${labels?.[i] || i}`} className='flex w-6 flex-col items-center justify-end gap-1'>
+							<div className='w-full rounded-t bg-gradient-to-t from-[#0a5f88] to-[#06d5e0]' style={{ height: `${h}px` }} title={`${labels?.[i] || i}: ${safe}`} />
+							<span className='text-[10px] font-semibold text-slate-500'>{(labels?.[i] || '').slice(0, 2)}</span>
+						</div>
+					)
+				})}
+			</div>
+		</div>
 	)
 }
 
@@ -247,7 +234,6 @@ const normalizeSuggestionsPayload = (payload) => {
 		}
 	}
 
-	// Backend may return a string or an object.
 	const raw = typeof payload === 'string' ? { summary: payload } : payload
 	let summary = raw?.summary || raw?.synthese || raw?.synthesis || raw?.resume || ''
 	const detectedRole = raw?.detectedRole || raw?.role || raw?.jobTitle || ''
@@ -255,7 +241,6 @@ const normalizeSuggestionsPayload = (payload) => {
 
 	let strengths = toStringList(raw?.strengths || raw?.pointsForts || raw?.highlights || raw?.strongPoints)
 
-	// Fallback: extract a "Points forts" section from the summary text.
 	if (strengths.length === 0 && typeof summary === 'string' && /points\s+forts?/i.test(summary)) {
 		const match = summary.match(
 			/points\s+forts?\s*[:\-]\s*([\s\S]*?)(?=\n\s*(?:axes\s+d['’]am[ée]lioration|recommandations?|am[ée]liorations?)\b|$)/i
@@ -266,7 +251,6 @@ const normalizeSuggestionsPayload = (payload) => {
 		}
 	}
 
-	// If backend already sends categorized recommendations.
 	const recommendationsByCategory = {}
 	const categorized = raw?.recommendationsByCategory || raw?.recommendations || raw?.improvements || null
 	if (categorized && typeof categorized === 'object' && !Array.isArray(categorized)) {
@@ -277,7 +261,6 @@ const normalizeSuggestionsPayload = (payload) => {
 				.filter(Boolean)
 		}
 	} else {
-		// Fallback: use the flat `suggestions` array and infer categories.
 		const flat = Array.isArray(raw?.suggestions) ? raw.suggestions : []
 		for (const item of flat) {
 			const normalizedItem = typeof item === 'string' ? { title: item } : item
@@ -289,7 +272,6 @@ const normalizeSuggestionsPayload = (payload) => {
 		}
 	}
 
-	// Stable ordering for display.
 	const orderedKeys = ['Formation', 'Compétences techniques (skills)', 'Compétences (soft skills)', 'Expérience', 'Projets & Portfolio', 'Structure & ATS', 'Langues', 'Autres']
 	const ordered = {}
 	for (const key of orderedKeys) {
@@ -320,6 +302,7 @@ function DashboardCand() {
 		}
 	})
 	const candidateSessionIdRef = useRef(candidateSessionId)
+	
 	useEffect(() => {
 		candidateSessionIdRef.current = candidateSessionId
 	}, [candidateSessionId])
@@ -327,6 +310,10 @@ function DashboardCand() {
 	const [dashboardStats, setDashboardStats] = useState(null)
 	const [dashboardLoading, setDashboardLoading] = useState(false)
 	const [dashboardError, setDashboardError] = useState('')
+	const [interviewCalendarMonth, setInterviewCalendarMonth] = useState(() => {
+		const now = new Date()
+		return new Date(now.getFullYear(), now.getMonth(), 1)
+	})
 	const [selectedJobId, setSelectedJobId] = useState(null)
 	const [savedJobs, setSavedJobs] = useState(() => new Set())
 	const [searchQuery, setSearchQuery] = useState('')
@@ -334,10 +321,6 @@ function DashboardCand() {
 	const [salaryMax, setSalaryMax] = useState('')
 	const [experienceMinYears, setExperienceMinYears] = useState('')
 	const [currentTime, setCurrentTime] = useState(new Date())
-	const [interviewCalendarMonth, setInterviewCalendarMonth] = useState(() => {
-		const now = new Date()
-		return new Date(now.getFullYear(), now.getMonth(), 1)
-	})
 	const [jobs, setJobs] = useState([])
 	const [candidacies, setCandidacies] = useState([])
 	const [loading, setLoading] = useState(true)
@@ -444,7 +427,7 @@ function DashboardCand() {
 
 			const payloadBase = {
 				candidateId,
-				candidateName,
+				candidateName: candidate ? `${candidate.firstName} ${candidate.lastName}` : 'Candidat',
 				chatType: 'assistant',
 				chatId: assistantChatId || '',
 				suggestions: suggestionsData || '',
@@ -495,10 +478,10 @@ function DashboardCand() {
 
 			const payloadBase = {
 				candidateId,
-				candidateName,
+				candidateName: candidate ? `${candidate.firstName} ${candidate.lastName}` : 'Candidat',
 				chatType: 'offerHelp',
 				chatId: offerHelpChatId || '',
-				jobOfferId: selectedJob?.id || '',
+				jobOfferId: selectedJobId || '',
 				jobTitle: selectedJob?.title || '',
 				company: selectedJob?.company || '',
 				suggestions: suggestionsData || '',
@@ -549,7 +532,6 @@ function DashboardCand() {
 	const candidateIdForSession = candidate?.id || candidate?._id
 
 	useEffect(() => {
-		// When candidate session changes (id), re-allow hydration.
 		setAssistantHydrated(false)
 		setOfferHelpHydrated(false)
 		setAssistantChatId(null)
@@ -567,7 +549,6 @@ function DashboardCand() {
 		if (assistantHydrated) return
 		const candidateId = candidate?.id || candidate?._id
 		if (!candidateId) return
-		// Only hydrate if user hasn't started a new conversation yet.
 		if (assistantChatId || assistantMessages.length > 1) {
 			setAssistantHydrated(true)
 			return
@@ -686,7 +667,7 @@ function DashboardCand() {
 			{
 				title: 'Emploi',
 				items: [
-						{ key: 'offerHelp', label: 'Aide pour une offre' },
+					{ key: 'offerHelp', label: 'Aide pour une offre' },
 					{ key: 'offres', label: "Offres d'emploi", count: jobs.length },
 					{ key: 'candidatures', label: 'Mes candidatures', count: candidacies.length },
 				],
@@ -1208,7 +1189,7 @@ function DashboardCand() {
 			cells,
 		}
 	}, [dashboardStats, interviewCalendarMonth])
-
+	
 	useEffect(() => {
 		if (selectedView !== 'notifications') return
 		const candidateId = candidate?.id || candidate?._id
@@ -1246,7 +1227,6 @@ function DashboardCand() {
 		const candidateId = candidate?.id || candidate?._id
 		if (!candidateId) return
 		refreshCvHistory(candidateId, { autoSelect: false })
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [selectedView, candidate])
 
 	useEffect(() => {
@@ -1293,6 +1273,10 @@ function DashboardCand() {
 		localStorage.removeItem('airCandidateSessionId')
 		setCandidateSessionId('')
 		navigate('/connecter')
+	}
+
+	const handleRefreshPage = () => {
+		window.location.reload()
 	}
 
 	const handleAnalyzeCv = async () => {
@@ -1389,7 +1373,6 @@ function DashboardCand() {
 			return
 		}
 
-		// If the active CV is a generated one, we can prefill the builder from it.
 		if (activeCvId && activeCvMeta?.source === 'generated') {
 			try {
 				const res = await fetch(`${API_BASE}/cv/by-id/${activeCvId}?candidateId=${encodeURIComponent(candidateId)}`)
@@ -1413,7 +1396,6 @@ function DashboardCand() {
 			return
 		}
 
-		// For uploaded CVs (or if there is no active CV yet), we still allow creating a new generated CV via the builder.
 		navigate('/EspaceCandidat/construire/etape-1')
 	}
 
@@ -1425,6 +1407,7 @@ function DashboardCand() {
 	}, [candidate])
 
 	const candidateName = candidate ? `${candidate.firstName} ${candidate.lastName}` : 'Candidat'
+	const chatUserLabel = String(candidateName || '').trim() || 'Vous'
 	const candidateTitle = candidate?.professionalTitle || "À l'écoute d'opportunités"
 
 	const formattedTime = useMemo(() => {
@@ -1521,7 +1504,6 @@ function DashboardCand() {
 			const data = await res.json()
 			if (data.success) {
 				setApplyStatus({ type: 'success', message: 'Candidature envoyée avec succès.' })
-				// Refresh candidacies
 				const candidaciesRes = await fetch(`${API_BASE}/candidacies/${candidateId}`)
 				const candidaciesData = await candidaciesRes.json()
 				if (candidaciesData.success) setCandidacies(candidaciesData.candidacies)
@@ -1639,6 +1621,14 @@ function DashboardCand() {
 								</span>
 								<button
 									type='button'
+									onClick={handleRefreshPage}
+									className='rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50'
+									title='Rafraîchir la page'
+								>
+									Rafraîchir
+								</button>
+								<button
+									type='button'
 									onClick={() => setSelectedView('candidatures')}
 									className='rounded-xl bg-[#001d3e] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-95'
 								>
@@ -1648,24 +1638,26 @@ function DashboardCand() {
 						</div>
 
 						{selectedView === 'offres' ? (
-							<div className='mt-8 space-y-5'>
+							<div className='mt-8 space-y-6'>
 								{loadError ? (
 									<div className='rounded-2xl border border-rose-200 bg-rose-50 p-4'>
 										<p className='text-sm font-semibold text-rose-800'>{loadError}</p>
 									</div>
 								) : null}
-								<div className='rounded-2xl border border-[#b9d5ea] bg-gradient-to-br from-[#f8fcff] via-[#f2f9ff] to-[#e8f3fc] p-4 shadow-[0_10px_24px_rgba(8,51,93,0.08)]'>
-									<div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
-										<p className='text-[11px] font-black tracking-[0.12em] text-[#0d355b]'>RECHERCHE ET FILTRES</p>
-										<p className='text-[11px] font-semibold text-[#6283a2]'>Affinez les offres selon vos critères</p>
+								<div className='overflow-hidden rounded-2xl border border-[#b9d5ea] bg-gradient-to-br from-[#f8fcff] via-[#f2f9ff] to-[#e8f3fc] shadow-[0_12px_28px_rgba(8,51,93,0.1)]'>
+									<div className='flex flex-wrap items-center justify-between gap-2 border-b border-[#0d355b]/25 bg-gradient-to-r from-[#0d355b] to-[#0a5f88] px-4 py-3'>
+										<p className='text-[11px] font-black tracking-[0.12em] text-cyan-100'>RECHERCHE ET FILTRES</p>
+										<p className='text-[11px] font-semibold text-cyan-50/90'>Trouvez les offres qui correspondent à votre profil</p>
 									</div>
 
+									<div className='space-y-3 p-4'>
+
 									<div className='grid gap-3 lg:grid-cols-[1fr_220px]'>
-										<div className='flex items-center gap-3 rounded-xl border border-[#c6dff2] bg-white px-4 py-3'>
+										<div className='flex flex-col gap-3 rounded-xl border border-[#c6dff2] bg-white px-4 py-3 sm:flex-row sm:items-center'>
 											<span className='text-lg text-[#5f89ad]'>🔍</span>
 											<input
 												type='text'
-												placeholder='Titre, compétence, entreprise…'
+												placeholder='Poste, entreprise, lieu, compétence…'
 												value={searchQuery}
 												onChange={(e) => setSearchQuery(e.target.value)}
 												className='w-full bg-transparent text-sm font-medium text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
@@ -1673,47 +1665,47 @@ function DashboardCand() {
 											<button
 												type='button'
 												onClick={() => setSearchQuery('')}
-												className='shrink-0 rounded-lg border border-[#c6dff2] bg-[#f4faff] px-3 py-1.5 text-xs font-semibold text-[#2b587f] transition hover:bg-[#e8f3ff]'
+												className='w-full shrink-0 rounded-lg border border-[#c6dff2] bg-[#f4faff] px-3 py-1.5 text-xs font-semibold text-[#2b587f] transition hover:bg-[#e8f3ff] sm:w-auto'
 											>
-												Réinitialiser
+												Effacer recherche
 											</button>
 										</div>
 										<select className='rounded-xl border border-[#c6dff2] bg-white px-4 py-3 text-sm font-semibold text-[#1e4268] outline-none'>
-											<option>Pertinence</option>
-											<option>Date</option>
-											<option>Salaire</option>
+											<option>Tri: pertinence</option>
+											<option>Tri: plus récent</option>
+											<option>Tri: rémunération</option>
 										</select>
 									</div>
 
 									<div className='mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
 										<div className='rounded-xl border border-[#c6dff2] bg-white px-4 py-3'>
-											<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>SALAIRE MIN</p>
+											<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>RÉMUNÉRATION MIN (TND/MOIS)</p>
 											<input
 												type='number'
 												inputMode='numeric'
-												placeholder='ex: 2500'
+												placeholder='ex: 1200'
 												value={salaryMin}
 												onChange={(e) => setSalaryMin(e.target.value)}
 												className='mt-1 w-full bg-transparent text-sm font-semibold text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
 											/>
 										</div>
 										<div className='rounded-xl border border-[#c6dff2] bg-white px-4 py-3'>
-											<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>SALAIRE MAX</p>
+											<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>RÉMUNÉRATION MAX (TND/MOIS)</p>
 											<input
 												type='number'
 												inputMode='numeric'
-												placeholder='ex: 4000'
+												placeholder='ex: 3000'
 												value={salaryMax}
 												onChange={(e) => setSalaryMax(e.target.value)}
 												className='mt-1 w-full bg-transparent text-sm font-semibold text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
 											/>
 										</div>
 										<div className='rounded-xl border border-[#c6dff2] bg-white px-4 py-3'>
-											<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>EXPÉRIENCE MIN</p>
+											<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>EXPÉRIENCE MINIMALE</p>
 											<input
 												type='number'
 												inputMode='numeric'
-												placeholder='ans (ex: 2)'
+												placeholder='années (ex: 2)'
 												value={experienceMinYears}
 												onChange={(e) => setExperienceMinYears(e.target.value)}
 												className='mt-1 w-full bg-transparent text-sm font-semibold text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
@@ -1726,15 +1718,16 @@ function DashboardCand() {
 												setSalaryMax('')
 												setExperienceMinYears('')
 											}}
-											className='rounded-xl border border-[#a8c9e4] bg-gradient-to-br from-white to-[#edf6ff] px-4 py-3 text-sm font-semibold text-[#1f476f] transition hover:bg-[#e6f2ff]'
+											className='rounded-xl border border-[#001d3e] bg-[#001d3e] px-4 py-3 text-sm font-semibold text-white transition hover:opacity-95'
 										>
-											Réinitialiser filtres
+											Réinitialiser tous les filtres
 										</button>
+									</div>
 									</div>
 								</div>
 
-								<div className='grid gap-6 lg:grid-cols-[1fr_420px]'>
-									<div className='overflow-hidden rounded-2xl border border-slate-200 bg-white'>
+								<div className='grid gap-6 lg:grid-cols-[1.2fr_0.95fr]'>
+									<div className='overflow-hidden rounded-2xl border border-[#b6cfe6] bg-white shadow-[0_8px_20px_rgba(8,51,93,0.08)]'>
 										<div className='flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3'>
 											<p className='text-sm font-semibold text-slate-700'>
 												<span className='font-black text-[#0d355b]'>{filtered.length}</span> offres correspondent
@@ -1752,7 +1745,7 @@ function DashboardCand() {
 													return (
 														<div
 															key={j.id}
-															className={`relative w-full rounded-2xl border transition ${active ? 'border-cyan-300 bg-cyan-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+															className={`relative w-full rounded-2xl border border-l-4 transition ${active ? 'border-cyan-300 border-l-[#0a5f88] bg-cyan-50 shadow-[0_8px_18px_rgba(9,84,129,0.12)]' : 'border-slate-200 border-l-[#0d355b]/20 bg-white hover:bg-slate-50'}`}
 														>
 															<button
 																type='button'
@@ -1813,8 +1806,8 @@ function DashboardCand() {
 
 									<div className='flex flex-col gap-4'>
 										{selectedJob && (
-											<div className='overflow-hidden rounded-2xl border border-slate-200 bg-white'>
-												<div className='border-b border-slate-200 p-5'>
+											<div className='overflow-hidden rounded-2xl border border-[#0d355b]/25 bg-white shadow-[0_10px_24px_rgba(8,51,93,0.12)]'>
+												<div className='border-b border-[#0d355b]/15 bg-gradient-to-r from-[#f2f8ff] to-white p-5'>
 													<div className='flex items-start justify-between gap-3'>
 														<div className='flex items-center gap-3'>
 															<div className='flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-2xl'>
@@ -1831,7 +1824,7 @@ function DashboardCand() {
 														<button
 															type='button'
 															onClick={(e) => toggleSave(e, selectedJob.id)}
-															className='rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50'
+															className='rounded-xl border border-[#0d355b]/20 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50'
 														>
 															{savedJobs.has(selectedJob.id) ? 'Retirer ♥' : 'Favoris ♡'}
 														</button>
@@ -1848,18 +1841,18 @@ function DashboardCand() {
 																	) : null}
 													</div>
 
-													<div className='mt-4 grid grid-cols-3 gap-3'>
-														<div className='rounded-2xl border border-slate-200 bg-slate-50 p-3'>
+													<div className='mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3'>
+														<div className='rounded-2xl border border-[#0d355b]/15 bg-slate-50 p-3'>
 															<p className='text-xs font-semibold text-slate-600'>Contrat</p>
-															<p className='mt-1 text-xl font-black text-[#0d355b]'>{selectedJob.type}</p>
+															<p className='mt-1 break-words text-lg font-black leading-tight text-[#0d355b]'>{selectedJob.type}</p>
 														</div>
-														<div className='rounded-2xl border border-slate-200 bg-slate-50 p-3'>
+														<div className='rounded-2xl border border-[#0d355b]/15 bg-slate-50 p-3'>
 															<p className='text-xs font-semibold text-slate-600'>Clôture</p>
-															<p className='mt-1 text-xl font-black text-amber-700'>{selectedJob.closes}</p>
+															<p className='mt-1 break-words text-lg font-black leading-tight text-amber-700'>{selectedJob.closes}</p>
 														</div>
-														<div className='rounded-2xl border border-slate-200 bg-slate-50 p-3'>
+														<div className='rounded-2xl border border-[#0d355b]/15 bg-slate-50 p-3'>
 															<p className='text-xs font-semibold text-slate-600'>TND/mois</p>
-															<p className='mt-1 text-xl font-black text-[#103b62]'>{selectedJob.salary}</p>
+															<p className='mt-1 break-words text-lg font-black leading-tight text-[#103b62]'>{selectedJob.salary}</p>
 														</div>
 													</div>
 
@@ -2077,7 +2070,7 @@ function DashboardCand() {
 							</div>
 						) : selectedView === 'suggestions' ? (
 							<div className='mt-8 rounded-2xl border border-[#9fc3e1] bg-gradient-to-br from-[#f7fbff] via-[#edf6ff] to-[#deedfb] p-5 ring-1 ring-[#bdd8ef] shadow-[0_14px_34px_rgba(8,51,93,0.13)]'>
-								<div className='flex items-start justify-between gap-3 flex-wrap'>
+								<div className='flex flex-wrap items-start justify-between gap-3'>
 									<div>
 										<p className='text-lg font-bold text-[#0d355b]'>Suggestions</p>
 										<p className='mt-1 text-sm text-[#4f7191]'>Analyse de votre CV et recommandations selon le marché (ATS, mots-clés, structure).</p>
@@ -2086,7 +2079,7 @@ function DashboardCand() {
 										<button
 											type='button'
 											onClick={() => setSelectedView('cv')}
-											className='rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50'
+											className='rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50'
 										>
 											Voir mon CV
 										</button>
@@ -2108,74 +2101,99 @@ function DashboardCand() {
 									</div>
 								) : null}
 
-									{suggestionsData ? (
+								{suggestionsData ? (
 									<div className='mt-5 space-y-4'>
-										<div className='rounded-2xl border border-slate-200 bg-slate-50 p-4'>
-											<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>SYNTHÈSE</p>
-												<p className='mt-2 text-xs font-semibold text-slate-600'>Avis de l’IA — points forts détectés</p>
-												{normalizedSuggestions.strengths.length > 0 ? (
-													<ul className='mt-3 list-disc space-y-1 pl-5 text-sm text-slate-700'>
-														{normalizedSuggestions.strengths.map((point, idx) => (
-															<li key={`strength-${idx}`}>{point}</li>
-														))}
-													</ul>
-												) : (
-													<p className='mt-2 text-sm leading-7 text-slate-700'>{normalizedSuggestions.summary || '—'}</p>
-												)}
-												{normalizedSuggestions.summary && normalizedSuggestions.strengths.length > 0 ? (
-													<div className='mt-4 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700'>
-														<p className='text-xs font-black tracking-[0.12em] text-slate-600'>Résumé global</p>
-														<p className='mt-2 leading-7'>{normalizedSuggestions.summary}</p>
-													</div>
-												) : null}
-											<div className='mt-3 flex flex-wrap gap-2'>
-													{normalizedSuggestions.detectedRole ? <Badge variant='cyan'>{normalizedSuggestions.detectedRole}</Badge> : null}
-													{normalizedSuggestions.detectedLanguage ? <Badge variant='slate'>{normalizedSuggestions.detectedLanguage}</Badge> : null}
+										<div className='grid gap-4 sm:grid-cols-3'>
+											<div className='rounded-2xl border border-[#d7e9f8] bg-white p-4'>
+												<p className='text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Points forts</p>
+												<p className='mt-1 text-3xl font-black text-[#0d355b]'>{normalizedSuggestions.strengths.length}</p>
+											</div>
+											<div className='rounded-2xl border border-[#d7e9f8] bg-white p-4'>
+												<p className='text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Catégories</p>
+												<p className='mt-1 text-3xl font-black text-[#0d355b]'>{Object.keys(normalizedSuggestions.recommendationsByCategory).length}</p>
+											</div>
+											<div className='rounded-2xl border border-[#d7e9f8] bg-gradient-to-br from-[#0f2742] to-[#0a5f88] p-4'>
+												<p className='text-xs font-bold uppercase tracking-wide text-cyan-100'>Rôle détecté</p>
+												<p className='mt-1 text-base font-black text-white'>{normalizedSuggestions.detectedRole || 'Non déterminé'}</p>
 											</div>
 										</div>
 
-										<div className='rounded-2xl border border-slate-200 bg-white p-4'>
-											<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>RECOMMANDATIONS</p>
-												<p className='mt-2 text-xs font-semibold text-slate-600'>Améliorations proposées par catégories (formation, skills, compétences, …)</p>
+										<div className='grid gap-4 xl:grid-cols-[0.92fr_1.28fr]'>
+											<div className='space-y-4'>
+												<div className='rounded-2xl border border-[#d7e9f8] bg-white p-4'>
+													<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>SYNTHÈSE</p>
+													<p className='mt-2 text-xs font-semibold text-slate-600'>Lecture rapide des points forts de votre CV.</p>
+													{normalizedSuggestions.strengths.length > 0 ? (
+														<ul className='mt-3 list-disc space-y-1 pl-5 text-sm text-slate-700'>
+															{normalizedSuggestions.strengths.map((point, idx) => (
+																<li key={`strength-${idx}`}>{point}</li>
+															))}
+														</ul>
+													) : (
+														<p className='mt-2 text-sm leading-7 text-slate-700'>{normalizedSuggestions.summary || '—'}</p>
+													)}
+													{normalizedSuggestions.summary && normalizedSuggestions.strengths.length > 0 ? (
+														<div className='mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700'>
+															<p className='text-xs font-black tracking-[0.12em] text-slate-600'>Résumé global</p>
+															<p className='mt-2 leading-7'>{normalizedSuggestions.summary}</p>
+														</div>
+													) : null}
+												</div>
+
+												<div className='rounded-2xl border border-[#d7e9f8] bg-white p-4'>
+													<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>PROFIL</p>
+													<div className='mt-3 flex flex-wrap gap-2'>
+														{normalizedSuggestions.detectedRole ? <Badge variant='cyan'>{normalizedSuggestions.detectedRole}</Badge> : null}
+														{normalizedSuggestions.detectedLanguage ? <Badge variant='slate'>{normalizedSuggestions.detectedLanguage}</Badge> : null}
+														<Badge variant='blue'>{Object.keys(normalizedSuggestions.recommendationsByCategory).length} catégories</Badge>
+													</div>
+												</div>
+											</div>
+
+											<div className='rounded-2xl border border-[#d7e9f8] bg-white p-4'>
+												<div className='flex items-center justify-between gap-3'>
+													<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>RECOMMANDATIONS</p>
+													<p className='text-xs font-semibold text-slate-500'>Par catégories</p>
+												</div>
+												<p className='mt-2 text-xs font-semibold text-slate-600'>Améliorations actionnables, organisées de façon claire.</p>
 												<div className='mt-4 space-y-3'>
 													{Object.keys(normalizedSuggestions.recommendationsByCategory).length > 0 ? (
 														Object.entries(normalizedSuggestions.recommendationsByCategory).map(([category, items]) => (
 															<div key={category} className='rounded-2xl border border-slate-200 bg-slate-50 p-4'>
-															<p className='text-sm font-black text-[#103b62]'>{category}</p>
-															<div className='mt-3 space-y-3'>
-																{(items || []).map((s, idx) => {
-																	const title = s?.title || s?.label || 'Suggestion'
-																	const missing = s?.missing || s?.why || ''
-																	const recommendation = s?.recommendation || s?.example || ''
-																	const priority = s?.priority
-																	return (
-																		<div key={`${category}-${title}-${idx}`} className='rounded-2xl border border-slate-200 bg-white p-4'>
-																			<div className='flex items-start justify-between gap-3'>
-																				<p className='text-sm font-black text-[#103b62]'>{title}</p>
-																				{priority ? (
-																					<Badge variant={priority === 'high' ? 'amber' : priority === 'low' ? 'slate' : 'blue'}>{priority}</Badge>
+																<p className='text-sm font-black text-[#103b62]'>{category}</p>
+																<div className='mt-3 space-y-3'>
+																	{(items || []).map((s, idx) => {
+																		const title = s?.title || s?.label || 'Suggestion'
+																		const missing = s?.missing || s?.why || ''
+																		const recommendation = s?.recommendation || s?.example || ''
+																		const priority = s?.priority
+																		return (
+																			<div key={`${category}-${title}-${idx}`} className='rounded-xl border border-slate-200 bg-white p-4'>
+																				<div className='flex items-start justify-between gap-3'>
+																					<p className='text-sm font-black text-[#103b62]'>{title}</p>
+																					{priority ? <Badge variant={priority === 'high' ? 'amber' : priority === 'low' ? 'slate' : 'blue'}>{priority}</Badge> : null}
+																				</div>
+																				{missing ? (
+																					<p className='mt-2 text-sm text-slate-700'>
+																						<span className='font-bold text-slate-700'>Manque / problème:</span> {missing}
+																					</p>
+																				) : null}
+																				{recommendation ? (
+																					<div className='mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700'>
+																						<span className='font-bold text-slate-700'>Recommandation:</span> {recommendation}
+																					</div>
 																				) : null}
 																			</div>
-																			{missing ? (
-																				<p className='mt-2 text-sm text-slate-700'>
-																					<span className='font-bold text-slate-700'>Manque / problème:</span> {missing}
-																				</p>
-																			) : null}
-																			{recommendation ? (
-																				<div className='mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700'>
-																					<span className='font-bold text-slate-700'>Recommandation:</span> {recommendation}
-																				</div>
-																			) : null}
-																		</div>
-																	)
-																})}
+																		)
+																	})}
+																</div>
 															</div>
-														</div>
-													))
-												) : (
-													<p className='text-sm font-semibold text-slate-600'>Aucune suggestion disponible.</p>
-												)}
+														))
+													) : (
+														<p className='text-sm font-semibold text-slate-600'>Aucune suggestion disponible.</p>
+													)}
 												</div>
+											</div>
 										</div>
 									</div>
 								) : (
@@ -2545,7 +2563,7 @@ function DashboardCand() {
 									<div className='mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800'>{dashboardError}</div>
 								) : null}
 
-								{!dashboardLoading && !dashboardError && dashboardStats ? (
+								{!dashboardLoading && !dashboardError && dashboardStats && (
 									<div className='mt-5 space-y-4'>
 										<div className='grid gap-4 sm:grid-cols-3'>
 											<div className='rounded-2xl border border-[#d7e9f8] bg-gradient-to-br from-[#eef8ff] to-[#e2f3ff] p-4'>
@@ -2677,24 +2695,24 @@ function DashboardCand() {
 												<div className='mt-3 space-y-1 text-xs font-semibold text-slate-600'>
 													<div className='flex items-center justify-between gap-2'>
 														<span className='inline-flex items-center gap-2'>
-															<span className='h-2.5 w-2.5 rounded-full' style={{ backgroundColor: '#001d3e' }} />
-															Candidatures
-														</span>
-														<span>{dashboardStats?.offers?.appliedCount ?? 0}</span>
+																<span className='h-2.5 w-2.5 rounded-full' style={{ backgroundColor: '#001d3e' }} />
+																Candidatures
+															</span>
+															<span>{dashboardStats?.offers?.appliedCount ?? 0}</span>
 													</div>
 													<div className='flex items-center justify-between gap-2'>
 														<span className='inline-flex items-center gap-2'>
-															<span className='h-2.5 w-2.5 rounded-full' style={{ backgroundColor: '#06d5e0' }} />
-															Entretiens
-														</span>
-														<span>{dashboardStats?.offers?.interviewsCount ?? 0}</span>
+																<span className='h-2.5 w-2.5 rounded-full' style={{ backgroundColor: '#06d5e0' }} />
+																Entretiens
+															</span>
+															<span>{dashboardStats?.offers?.interviewsCount ?? 0}</span>
 													</div>
 													<div className='flex items-center justify-between gap-2'>
 														<span className='inline-flex items-center gap-2'>
-															<span className='h-2.5 w-2.5 rounded-full' style={{ backgroundColor: '#0a5f88' }} />
-															Postulé + entretien
-														</span>
-														<span>{dashboardStats?.offers?.appliedWithInterviewCount ?? 0}</span>
+																<span className='h-2.5 w-2.5 rounded-full' style={{ backgroundColor: '#0a5f88' }} />
+																Postulé + entretien
+															</span>
+															<span>{dashboardStats?.offers?.appliedWithInterviewCount ?? 0}</span>
 													</div>
 												</div>
 											</div>
@@ -2781,11 +2799,11 @@ function DashboardCand() {
 											</div>
 										</div>
 									</div>
-								) : null}
+								)}
 							</div>
 						) : selectedView === 'offerHelp' ? (
 							<div className='mt-8 rounded-2xl border border-[#9fc3e1] bg-gradient-to-br from-[#f7fbff] via-[#edf6ff] to-[#deedfb] p-5 ring-1 ring-[#bdd8ef] shadow-[0_14px_34px_rgba(8,51,93,0.13)]'>
-								<div className='flex items-start justify-between gap-3 flex-wrap'>
+								<div className='flex flex-wrap items-start justify-between gap-3'>
 									<div>
 										<p className='text-lg font-bold text-[#0d355b]'>Aide pour une offre</p>
 										<p className='mt-1 text-sm text-[#4f7191]'>Sélectionne une offre, puis reçois des conseils et une préparation à l’entretien.</p>
@@ -2795,29 +2813,29 @@ function DashboardCand() {
 											<button
 												type='button'
 												onClick={() =>
-												sendOfferHelpMessage(
-													`Je postule à l’offre “${selectedJob.title}”. Donne-moi des conseils concrets pour adapter mon CV et mon message de candidature. Ensuite liste les mots-clés/compétences à mettre en avant.`
-												)
-											}
-											disabled={offerHelpLoading}
-											className={`rounded-xl px-4 py-2 text-xs font-semibold text-white shadow-sm transition ${offerHelpLoading ? 'bg-slate-300' : 'bg-gradient-to-r from-[#0b3c72] to-[#0a5f88] hover:brightness-110'}`}
-										>
-											Conseils candidature
-										</button>
+													sendOfferHelpMessage(
+														`Je postule à l’offre “${selectedJob.title}”. Donne-moi des conseils concrets pour adapter mon CV et mon message de candidature. Ensuite liste les mots-clés/compétences à mettre en avant.`
+													)
+												}
+												disabled={offerHelpLoading}
+												className={`rounded-xl px-4 py-2 text-xs font-semibold text-white shadow-sm transition ${offerHelpLoading ? 'bg-slate-300' : 'bg-gradient-to-r from-[#0b3c72] to-[#0a5f88] hover:brightness-110'}`}
+											>
+												Conseils candidature
+											</button>
 										) : null}
 										{selectedJob ? (
 											<button
 												type='button'
 												onClick={() =>
-												sendOfferHelpMessage(
-													`Prépare-moi à un entretien pour l’offre “${selectedJob.title}”. Je veux: (1) 10 questions probables + bonnes réponses, (2) questions techniques si pertinent, (3) pitch 60 secondes, (4) questions à poser au recruteur.`
-												)
-											}
-											disabled={offerHelpLoading}
-											className={`rounded-xl border border-cyan-200/70 bg-cyan-50 px-4 py-2 text-xs font-semibold text-[#0a5f88] transition hover:bg-cyan-100 ${offerHelpLoading ? 'opacity-60' : ''}`}
-										>
-											Préparation entretien
-										</button>
+													sendOfferHelpMessage(
+														`Prépare-moi à un entretien pour l’offre “${selectedJob.title}”. Je veux: (1) 10 questions probables + bonnes réponses, (2) questions techniques si pertinent, (3) pitch 60 secondes, (4) questions à poser au recruteur.`
+													)
+												}
+												disabled={offerHelpLoading}
+												className={`rounded-xl border border-cyan-200/70 bg-cyan-50 px-4 py-2 text-xs font-semibold text-[#0a5f88] transition hover:bg-cyan-100 ${offerHelpLoading ? 'opacity-60' : ''}`}
+											>
+												Préparation entretien
+											</button>
 										) : null}
 										<button
 											type='button'
@@ -2844,10 +2862,7 @@ function DashboardCand() {
 										<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>CONVERSATION</p>
 										<div className='mt-3 max-h-[56vh] space-y-3 overflow-y-auto pr-1'>
 											{offerHelpMessages.map((m, idx) => (
-												<div
-													key={`offer-help-msg-${idx}`}
-													className={`flex gap-2 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
-												>
+												<div key={`offer-help-msg-${idx}`} className={`flex gap-2 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
 													{m.role === 'assistant' ? (
 														<div className='mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#0b2f57] to-[#134a84] text-[11px] font-black text-white shadow-sm'>AI</div>
 													) : null}
@@ -2868,15 +2883,17 @@ function DashboardCand() {
 											))}
 										</div>
 
-										<div className='mt-4 flex flex-col gap-3 rounded-2xl border border-[#bfe8ff] bg-white p-4 shadow-[0_12px_30px_rgba(8,51,93,0.10)]'>
-											<textarea
-												rows={3}
-												value={offerHelpInput}
-												onChange={(e) => setOfferHelpInput(e.target.value)}
-												placeholder='Pose ta question sur cette offre (candidature, entretien, adaptation)…'
-												className='w-full resize-none rounded-xl border border-[#d0e6fa] bg-[#fbfeff] px-4 py-3 text-sm text-[#173c62] outline-none transition focus:border-[#7dd8ff] focus:ring-2 focus:ring-[#d9f4ff]'
-											/>
-											<div className='flex items-center justify-between gap-3 flex-wrap'>
+										<div className='mt-4 flex flex-col gap-3 rounded-2xl border border-[#d6e6f5] bg-white/85 p-3 md:flex-row md:items-end'>
+											<div className='flex-1'>
+												<textarea
+													rows={3}
+													value={offerHelpInput}
+													onChange={(e) => setOfferHelpInput(e.target.value)}
+													placeholder='Ex: adapte mon CV à cette offre et prépare-moi à l’entretien…'
+													className='w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-cyan-300'
+												/>
+											</div>
+											<div className='flex items-center gap-3'>
 												<div className='text-xs font-semibold text-[#6683a0]'>{offerHelpLoading ? 'En cours…' : selectedJob ? `Offre: ${selectedJob.title}` : 'Aucune offre sélectionnée'}</div>
 												<button
 													type='button'
@@ -2904,9 +2921,7 @@ function DashboardCand() {
 																type='button'
 																key={j.id}
 																onClick={() => setSelectedJobId(j.id)}
-																className={`w-full rounded-xl border px-3 py-2 text-left text-xs font-semibold transition ${
-																selectedJob?.id === j.id ? 'border-cyan-200 bg-white text-slate-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-															}`}
+																className={`w-full rounded-xl border px-3 py-2 text-left text-xs font-semibold transition ${selectedJob?.id === j.id ? 'border-cyan-200 bg-white text-slate-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
 															>
 																<div className='text-sm font-black text-[#103b62]'>{j.title}</div>
 																<div className='mt-1 text-xs text-slate-500'>{j.location ? `${j.location} · ` : ''}{j.contractType || j.type || ''}</div>
@@ -2923,7 +2938,7 @@ function DashboardCand() {
 													rows={7}
 													value={offerHelpOfferText}
 													onChange={(e) => setOfferHelpOfferText(e.target.value)}
-													placeholder="Colle ici la description de l’offre (missions, compétences, exigences)…"
+													placeholder='Colle ici la description de l’offre (missions, compétences, exigences)…'
 													className='mt-2 w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-300'
 												/>
 											</div>
@@ -2994,72 +3009,91 @@ function DashboardCand() {
 										))}
 									</div>
 
-									<div className='mt-4 flex flex-col gap-3 rounded-2xl border border-[#bfe8ff] bg-white p-4 shadow-[0_12px_30px_rgba(8,51,93,0.10)]'>
-										<textarea
-											rows={3}
-											value={assistantInput}
-											onChange={(e) => setAssistantInput(e.target.value)}
-											placeholder='Pose ta question…'
-											className='w-full resize-none rounded-xl border border-[#d0e6fa] bg-[#fbfeff] px-4 py-3 text-sm text-[#173c62] outline-none transition focus:border-[#7dd8ff] focus:ring-2 focus:ring-[#d9f4ff]'
-										/>
-										<div className='flex items-center justify-between gap-3 flex-wrap'>
-											<div>
-												<p className='text-xs font-bold text-slate-700'>CV (optionnel)</p>
-												<input id='assistant-cv-input' type='file' accept='application/pdf,text/html' onChange={(e) => setAssistantFile(e.target.files?.[0] || null)} className='hidden' />
-												<label htmlFor='assistant-cv-input' className='mt-1 inline-flex cursor-pointer items-center rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-1.5 text-xs font-semibold text-[#0a5f88] transition hover:bg-cyan-100'>
-													Choisir un fichier
-												</label>
-												{!assistantFile ? <div className='mt-2 text-[11px] font-semibold text-slate-500'>Aucun fichier choisi</div> : null}
-												{assistantFile ? <div className='mt-2 text-xs font-semibold text-slate-600'>Fichier: {assistantFile.name}</div> : null}
-											</div>
-											<button
-												type='button'
-												onClick={handleAssistantSend}
-												disabled={assistantLoading || !assistantInput.trim()}
-												className={`rounded-xl px-4 py-2 text-xs font-semibold text-white shadow-sm transition ${assistantLoading || !assistantInput.trim() ? 'bg-slate-300' : 'bg-gradient-to-r from-[#0fa7d6] to-[#1b6fe0] hover:brightness-110'}`}
-											>
-												{assistantLoading ? 'En cours…' : 'Envoyer'}
-											</button>
+									<div className='mt-4 flex flex-col gap-3 rounded-2xl border border-[#d6e6f5] bg-white/85 p-3 md:flex-row md:items-end'>
+										<div className='flex-1'>
+											<textarea
+												rows={3}
+												value={assistantInput}
+												onChange={(e) => setAssistantInput(e.target.value)}
+												placeholder='Écris ton message à l’assistant…'
+												className='w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-cyan-300'
+											/>
 										</div>
+										<div className='flex flex-col items-start gap-2'>
+											<input id='assistant-cv-input' type='file' accept='application/pdf,text/html' onChange={(e) => setAssistantFile(e.target.files?.[0] || null)} className='hidden' />
+											<label htmlFor='assistant-cv-input' className='inline-flex cursor-pointer items-center rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-1.5 text-xs font-semibold text-[#0a5f88] transition hover:bg-cyan-100'>
+												Choisir un fichier
+											</label>
+											{!assistantFile ? <div className='text-[11px] font-semibold text-slate-500'>Aucun fichier choisi</div> : null}
+											{assistantFile ? <div className='text-xs font-semibold text-slate-600'>Fichier: {assistantFile.name}</div> : null}
+										</div>
+										<button
+											type='button'
+											onClick={handleAssistantSend}
+											disabled={assistantLoading || !assistantInput.trim()}
+											className={`rounded-xl px-4 py-2 text-xs font-semibold text-white shadow-sm transition ${assistantLoading || !assistantInput.trim() ? 'bg-slate-300' : 'bg-gradient-to-r from-[#0fa7d6] to-[#1b6fe0] hover:brightness-110'}`}
+										>
+											{assistantLoading ? 'En cours…' : 'Envoyer'}
+										</button>
 									</div>
 								</div>
 							</div>
-						) : (
-							<div className='mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-5'>
-								<p className='text-lg font-bold text-[#0d355b]'>
-									{selectedView === 'candidatures' ? 'Mes candidatures' : 'Section bientôt disponible'}
-								</p>
-								<p className='mt-1 text-sm text-[#4f7191]'>
-									{selectedView === 'candidatures' && candidacies.length > 0
-										? `Vous avez postulé à ${candidacies.length} offre(s)`
-										: 'Cette section sera activée ensuite.'}
-								</p>
-								{selectedView === 'candidatures' && candidacies.length === 0 ? (
-									<div className='mt-4 rounded-xl border border-slate-200 bg-white p-4'>
+						) : selectedView === 'candidatures' ? (
+							<div className='mt-8 rounded-2xl border border-[#9fc3e1] bg-gradient-to-br from-[#f7fbff] via-[#edf6ff] to-[#deedfb] p-5 ring-1 ring-[#bdd8ef] shadow-[0_14px_34px_rgba(8,51,93,0.13)]'>
+								<div className='rounded-2xl border border-[#0f2f57] bg-[#0b2b4f] px-4 py-3 shadow-[0_10px_24px_rgba(7,38,73,0.35)]'>
+									<div className='flex flex-wrap items-center justify-between gap-2'>
+										<p className='text-xl font-black text-white'>Mes candidatures</p>
+										<span className='rounded-full border border-cyan-300/40 bg-cyan-400/10 px-3 py-1 text-xs font-black tracking-[0.08em] text-cyan-100'>
+											{candidacies.length} offre(s)
+										</span>
+									</div>
+									<p className='mt-1 text-sm font-semibold text-cyan-100/90'>Suivi centralisé de vos candidatures et statuts.</p>
+								</div>
+
+								{candidacies.length === 0 ? (
+									<div className='mt-4 rounded-2xl border border-slate-200 bg-white p-5'>
 										<p className='text-sm font-semibold text-slate-700'>Aucune candidature pour le moment.</p>
 										<p className='mt-1 text-xs text-slate-500'>Postulez à une offre pour la voir ici.</p>
 									</div>
-								) : null}
-								{selectedView === 'candidatures' && candidacies.length > 0 && (
-									<div className='mt-4 space-y-3'>
+								) : (
+									<div className='mt-4 grid gap-4 lg:grid-cols-2'>
 										{candidacies.map((c) => {
 											const offer = c.jobOfferId
 											const createdAt = c.createdAt ? new Date(c.createdAt) : null
+											const rawStatus = String(c.status || 'En attente').toLowerCase()
+											const statusClass = rawStatus.includes('applied') || rawStatus.includes('postul')
+												? 'border-cyan-200 bg-cyan-50 text-cyan-800'
+												: rawStatus.includes('interview') || rawStatus.includes('entretien')
+													? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+													: rawStatus.includes('reject') || rawStatus.includes('refus')
+														? 'border-rose-200 bg-rose-50 text-rose-800'
+														: 'border-slate-200 bg-slate-50 text-slate-700'
+
 											return (
-												<div key={c._id} className='rounded-xl border border-slate-200 bg-white p-4'>
-													<p className='font-semibold text-[#0d355b]'>{offer?.title || 'Offre'}</p>
-													<p className='mt-1 text-xs text-slate-500'>
-														{offer?.location ? `${offer.location} · ` : ''}{offer?.contractType || ''}
-													</p>
-													<p className='mt-2 text-sm text-slate-600'>
-														Postulé le: {createdAt ? createdAt.toLocaleDateString() : '—'}
-													</p>
-													<p className='text-sm text-slate-600'>Statut: {c.status || 'En attente'}</p>
-											</div>
+												<div key={c._id} className='overflow-hidden rounded-2xl border border-[#b6cfe6] bg-white shadow-[0_8px_20px_rgba(8,51,93,0.08)]'>
+													<div className='h-1.5 bg-gradient-to-r from-[#0b2f57] via-[#0a5f88] to-[#06d5e0]' />
+													<div className='p-4'>
+														<div className='flex items-start justify-between gap-3'>
+															<p className='text-2xl font-bold leading-tight text-[#0d355b]'>{offer?.title || 'Offre'}</p>
+															<span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${statusClass}`}>{c.status || 'En attente'}</span>
+														</div>
+														<p className='mt-2 text-sm font-semibold text-[#4f7191]'>
+															{offer?.location ? `${offer.location} · ` : ''}{offer?.contractType || '—'}
+														</p>
+														<div className='mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700'>
+															Postulé le: <span className='font-bold text-[#0d355b]'>{createdAt ? createdAt.toLocaleDateString() : '—'}</span>
+														</div>
+													</div>
+												</div>
 											)
 										})}
 									</div>
 								)}
+							</div>
+						) : (
+							<div className='mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-5'>
+								<p className='text-lg font-bold text-[#0d355b]'>Section bientôt disponible</p>
+								<p className='mt-1 text-sm text-[#4f7191]'>Cette section sera activée ensuite.</p>
 							</div>
 						)}
 					</div>

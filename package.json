@@ -5,6 +5,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "concurrently \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
+    "dev:all": "concurrently \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\" \"npm run dev:cv-analyzer\"",
+    "dev:cv-analyzer": "set \"CV_NLP_MAX_CHARS=9000\" && ..\\.venv\\Scripts\\python.exe -m uvicorn api:app --app-dir analyse-cv --host 127.0.0.1 --port 8001",
+    "dev:cv-analyzer:detached": "start \"AIR-CV\" /MIN cmd /c \"set CV_NLP_MAX_CHARS=9000 && ..\\.venv\\Scripts\\python.exe -m uvicorn api:app --app-dir analyse-cv --host 127.0.0.1 --port 8001\"",
     "dev:frontend": "npm run dev --prefix frontend",
     "dev:backend": "npm run dev --prefix backend",
     "build": "npm run build --prefix frontend",
