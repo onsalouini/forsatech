@@ -3,6 +3,30 @@ import { useNavigate } from 'react-router-dom'
 import { assets } from '../assets/assets'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+const COUNTRY_EMOJI_FONT = '"Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", "Jost", sans-serif'
+const SIGNUP_COUNTRY_OTHER = '__OTHER__'
+const SIGNUP_COUNTRIES = [
+	{ value: 'Tunisie', label: '🇹🇳 Tunisie' },
+	{ value: 'France', label: '🇫🇷 France' },
+	{ value: 'Algérie', label: '🇩🇿 Algérie' },
+	{ value: 'Maroc', label: '🇲🇦 Maroc' },
+	{ value: 'Égypte', label: '🇪🇬 Égypte' },
+	{ value: 'Belgique', label: '🇧🇪 Belgique' },
+	{ value: 'Suisse', label: '🇨🇭 Suisse' },
+	{ value: 'Canada', label: '🇨🇦 Canada' },
+	{ value: 'Allemagne', label: '🇩🇪 Allemagne' },
+	{ value: 'Italie', label: '🇮🇹 Italie' },
+	{ value: 'Espagne', label: '🇪🇸 Espagne' },
+	{ value: 'Portugal', label: '🇵🇹 Portugal' },
+	{ value: 'Royaume-Uni', label: '🇬🇧 Royaume-Uni' },
+	{ value: 'Pays-Bas', label: '🇳🇱 Pays-Bas' },
+	{ value: 'Suède', label: '🇸🇪 Suède' },
+	{ value: 'États-Unis', label: '🇺🇸 États-Unis' },
+	{ value: 'Émirats arabes unis', label: '🇦🇪 Émirats arabes unis' },
+	{ value: 'Arabie saoudite', label: '🇸🇦 Arabie saoudite' },
+	{ value: 'Qatar', label: '🇶🇦 Qatar' },
+	{ value: 'Turquie', label: '🇹🇷 Turquie' },
+]
 
 function CnnxRec() {
 	const navigate = useNavigate()
@@ -51,6 +75,14 @@ function CnnxRec() {
 		return { label: 'Tres fort', color: 'bg-emerald-500', width: 'w-full' }
 	}, [passwordScore])
 
+	const isSignupCustomCountry = useMemo(() => {
+		const value = String(signupData.country || '').trim()
+		if (!value) return false
+		return !SIGNUP_COUNTRIES.some((item) => item.value === value)
+	}, [signupData.country])
+
+	const selectedSignupCountryValue = isSignupCustomCountry ? SIGNUP_COUNTRY_OTHER : String(signupData.country || '')
+
 	const handleLoginSubmit = async (e) => {
 		e.preventDefault()
 		setAuthError('')
@@ -87,6 +119,7 @@ function CnnxRec() {
 		if (!signupData.password || signupData.password !== signupData.confirmPassword) return
 
 		try {
+			const countryToSave = signupData.country === SIGNUP_COUNTRY_OTHER ? '' : signupData.country
 			setSignupLoading(true)
 			const response = await fetch(`${API_BASE}/recruiters/register`, {
 				method: 'POST',
@@ -97,7 +130,7 @@ function CnnxRec() {
 					email: signupData.email,
 					company: signupData.company,
 					sector: signupData.sector,
-					country: signupData.country,
+					country: countryToSave,
 					companySize: signupData.companySize,
 					password: signupData.password,
 					plan: activePlan,
@@ -362,13 +395,38 @@ function CnnxRec() {
 
 										<div>
 											<label className='label'>Pays</label>
-											<input
-												type='text'
+											<select
 												required
-												value={signupData.country}
-												onChange={(e) => updateSignupField('country', e.target.value)}
+												value={selectedSignupCountryValue}
+												onChange={(e) => {
+													const nextValue = e.target.value
+													if (nextValue === SIGNUP_COUNTRY_OTHER) {
+														updateSignupField('country', SIGNUP_COUNTRY_OTHER)
+														return
+													}
+													updateSignupField('country', nextValue)
+												}}
 												className='input'
-											/>
+												style={{ fontFamily: COUNTRY_EMOJI_FONT }}
+											>
+												<option value=''>Choisir un pays...</option>
+												{SIGNUP_COUNTRIES.map((item) => (
+													<option key={item.value} value={item.value}>
+														{item.label}
+													</option>
+												))}
+												<option value={SIGNUP_COUNTRY_OTHER}>🌍 Autre (saisie manuelle)</option>
+											</select>
+											{isSignupCustomCountry ? (
+												<input
+													type='text'
+													required
+													placeholder='Saisir votre pays'
+													value={signupData.country === SIGNUP_COUNTRY_OTHER ? '' : signupData.country}
+													onChange={(e) => updateSignupField('country', e.target.value)}
+													className='input mt-2'
+												/>
+											) : null}
 										</div>
 
 										<div>

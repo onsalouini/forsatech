@@ -3492,6 +3492,7 @@ app.get('/api/candidacies/recruiter/:recruiterId', async (req, res) => {
     const candidacies = await Candidacy.find({ jobOfferId: { $in: offerIds } })
       .populate('candidateId', 'firstName lastName email professionalTitle sector experienceLevel country portfolioUrl createdAt')
       .populate('jobOfferId', 'title location workMode contractType salary')
+      .populate('quizAttemptId', 'scorePercent correctAnswers totalQuestions questions createdAt level domain')
       .sort({ createdAt: -1 });
 
     return res.status(200).json({

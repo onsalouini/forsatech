@@ -6,6 +6,7 @@ import { saveCvDraft } from '../utils/cvDraft'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 const API_ORIGIN = API_BASE.replace(/\/api\/?$/, '')
+const COUNTRY_EMOJI_FONT = '"Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", "Jost", sans-serif'
 
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n))
 const formatQuizSeconds = (totalSeconds) => {
@@ -229,6 +230,30 @@ const categoryFromText = (text) => {
 	return 'Autres'
 }
 
+const SETTINGS_COUNTRY_OTHER = '__OTHER__'
+const SETTINGS_COUNTRIES = [
+	{ value: 'Tunisie', label: '🇹🇳 Tunisie' },
+	{ value: 'France', label: '🇫🇷 France' },
+	{ value: 'Algérie', label: '🇩🇿 Algérie' },
+	{ value: 'Maroc', label: '🇲🇦 Maroc' },
+	{ value: 'Égypte', label: '🇪🇬 Égypte' },
+	{ value: 'Belgique', label: '🇧🇪 Belgique' },
+	{ value: 'Suisse', label: '🇨🇭 Suisse' },
+	{ value: 'Canada', label: '🇨🇦 Canada' },
+	{ value: 'Allemagne', label: '🇩🇪 Allemagne' },
+	{ value: 'Italie', label: '🇮🇹 Italie' },
+	{ value: 'Espagne', label: '🇪🇸 Espagne' },
+	{ value: 'Portugal', label: '🇵🇹 Portugal' },
+	{ value: 'Royaume-Uni', label: '🇬🇧 Royaume-Uni' },
+	{ value: 'Pays-Bas', label: '🇳🇱 Pays-Bas' },
+	{ value: 'Suède', label: '🇸🇪 Suède' },
+	{ value: 'États-Unis', label: '🇺🇸 États-Unis' },
+	{ value: 'Émirats arabes unis', label: '🇦🇪 Émirats arabes unis' },
+	{ value: 'Arabie saoudite', label: '🇸🇦 Arabie saoudite' },
+	{ value: 'Qatar', label: '🇶🇦 Qatar' },
+	{ value: 'Turquie', label: '🇹🇷 Turquie' },
+]
+
 const normalizeSuggestionsPayload = (payload) => {
 	if (!payload) {
 		return {
@@ -300,6 +325,13 @@ function DashboardCand() {
 	const navigate = useNavigate()
 	const [candidate, setCandidate] = useState(null)
 	const [selectedView, setSelectedView] = useState('offres')
+	const [isDarkMode, setIsDarkMode] = useState(() => {
+		try {
+			return localStorage.getItem('airCandidateTheme') === 'dark'
+		} catch {
+			return false
+		}
+	})
 	const [candidateSessionId, setCandidateSessionId] = useState(() => {
 		try {
 			return localStorage.getItem('airCandidateSessionId') || ''
@@ -418,6 +450,20 @@ function DashboardCand() {
 	const normalizedSuggestions = useMemo(() => normalizeSuggestionsPayload(suggestionsData), [suggestionsData])
 	const activeCvMeta = useMemo(() => cvHistory.find((x) => x?.isActive) || null, [cvHistory])
 	const selectedCvMeta = useMemo(() => cvHistory.find((x) => String(x?._id) === String(selectedCvId)) || null, [cvHistory, selectedCvId])
+	const isCustomCountry = useMemo(() => {
+		const value = String(settingsForm.country || '').trim()
+		if (!value) return false
+		return !SETTINGS_COUNTRIES.some((item) => item.value === value)
+	}, [settingsForm.country])
+	const selectedCountryValue = isCustomCountry ? SETTINGS_COUNTRY_OTHER : String(settingsForm.country || '')
+
+	useEffect(() => {
+		try {
+			localStorage.setItem('airCandidateTheme', isDarkMode ? 'dark' : 'light')
+		} catch {
+			// Ignore localStorage failures
+		}
+	}, [isDarkMode])
 
 	useEffect(() => {
 		const job = jobs.find((j) => j.id === selectedJobId) || null
@@ -768,6 +814,7 @@ function DashboardCand() {
 
 		setSettingsSaving(true)
 		try {
+			const countryToSave = settingsForm.country === SETTINGS_COUNTRY_OTHER ? '' : settingsForm.country
 			const res = await fetch(`${API_BASE}/candidates/${candidateId}`, {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
@@ -775,7 +822,7 @@ function DashboardCand() {
 					firstName: settingsForm.firstName,
 					lastName: settingsForm.lastName,
 					email: settingsForm.email,
-					country: settingsForm.country,
+					country: countryToSave,
 					birthDate: settingsForm.birthDate,
 					professionalTitle: settingsForm.professionalTitle,
 					sector: settingsForm.sector,
@@ -1692,9 +1739,12 @@ function DashboardCand() {
 	}
 
 	return (
-		<section className='min-h-screen bg-gradient-to-br from-[#eaf8ff] via-[#f3fbff] to-[#eef4ff]' style={{ fontFamily: "'Jost', sans-serif" }}>
+		<section
+			className={`candidate-dashboard min-h-screen bg-gradient-to-br from-[#eaf8ff] via-[#f3fbff] to-[#eef4ff] ${isDarkMode ? 'candidate-dashboard--dark' : ''}`}
+			style={{ fontFamily: "'Jost', sans-serif" }}
+		>
 			<div className='flex min-h-screen w-full'>
-				<aside className='w-[286px] shrink-0 bg-gradient-to-b from-[#051a3d] via-[#072a56] to-[#083d69] px-4 py-6 text-white'>
+				<aside className='candidate-dashboard__sidebar w-[286px] shrink-0 bg-gradient-to-b from-[#051a3d] via-[#072a56] to-[#083d69] px-4 py-6 text-white'>
 					<div className='mb-2 flex items-center justify-center px-2'>
 						<button type='button' onClick={() => navigate('/')} className='cursor-pointer' aria-label="Aller a l'accueil">
 							<img src={assets.logo} alt='AIR logo' className='h-28 w-auto object-contain' />
@@ -1768,7 +1818,7 @@ function DashboardCand() {
 				</aside>
 
 				<main className='flex-1 p-6'>
-					<div className='h-full rounded-3xl border border-[#cfe7f9] bg-white p-6 shadow-[0_15px_40px_rgba(8,51,93,0.08)]'>
+					<div className='candidate-dashboard__panel h-full rounded-3xl border border-[#cfe7f9] bg-white p-6 shadow-[0_15px_40px_rgba(8,51,93,0.08)]'>
 						<div className='flex flex-wrap items-start justify-between gap-4'>
 							<div>
 								<p className='text-4xl font-black text-[#000000]'>{greeting} 👋</p>
@@ -1777,14 +1827,29 @@ function DashboardCand() {
 								</p>
 							</div>
 							<div className='flex items-center gap-3'>
-								<span className='inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-sm font-semibold text-[#0a5f88]'>
+								<span className='candidate-dashboard__time inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-sm font-semibold text-[#0a5f88]'>
 									<span className='h-2 w-2 animate-pulse rounded-full bg-[#06d5e0]' />
 									{formattedTime}
 								</span>
+								<div className='flex items-center gap-2'>
+									<span className={`text-xs font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-500'}`}>{isDarkMode ? 'Sombre' : 'Clair'}</span>
+									<button
+										type='button'
+										onClick={() => setIsDarkMode((prev) => !prev)}
+										className={`theme-switch ${isDarkMode ? 'is-active' : ''}`}
+										role='switch'
+										aria-checked={isDarkMode}
+										aria-label='Basculer le mode sombre'
+										title='Basculer le thème'
+									>
+										<span className='theme-switch__track' />
+										<span className='theme-switch__thumb' />
+									</button>
+								</div>
 								<button
 									type='button'
 									onClick={handleRefreshPage}
-									className='rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50'
+									className='candidate-dashboard__ghost-btn rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50'
 									title='Rafraîchir la page'
 								>
 									Rafraîchir
@@ -1792,7 +1857,7 @@ function DashboardCand() {
 								<button
 									type='button'
 									onClick={() => setSelectedView('candidatures')}
-									className='rounded-xl bg-[#001d3e] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-95'
+									className='candidate-dashboard__primary-btn rounded-xl bg-[#001d3e] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-95'
 								>
 									Mes candidatures
 								</button>
@@ -2231,17 +2296,17 @@ function DashboardCand() {
 								) : null}
 							</div>
 						) : selectedView === 'suggestions' ? (
-							<div className='mt-8 rounded-2xl border border-[#9fc3e1] bg-gradient-to-br from-[#f7fbff] via-[#edf6ff] to-[#deedfb] p-5 ring-1 ring-[#bdd8ef] shadow-[0_14px_34px_rgba(8,51,93,0.13)]'>
+							<div className='suggestions-shell mt-8 rounded-2xl border p-5'>
 								<div className='flex flex-wrap items-start justify-between gap-3'>
 									<div>
-										<p className='text-lg font-bold text-[#0d355b]'>Suggestions</p>
-										<p className='mt-1 text-sm text-[#4f7191]'>Analyse de votre CV et recommandations selon le marché (ATS, mots-clés, structure).</p>
+										<p className='suggestions-title text-lg font-bold'>Suggestions</p>
+										<p className='suggestions-subtitle mt-1 text-sm'>Analyse de votre CV et recommandations selon le marché (ATS, mots-clés, structure).</p>
 									</div>
 									<div className='flex items-center gap-2'>
 										<button
 											type='button'
 											onClick={() => setSelectedView('cv')}
-											className='rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50'
+											className='suggestions-action-secondary rounded-xl border px-4 py-2 text-xs font-semibold transition'
 										>
 											Voir mon CV
 										</button>
@@ -2249,7 +2314,7 @@ function DashboardCand() {
 											type='button'
 											onClick={handleAnalyzeCv}
 											disabled={suggestionsLoading || !(candidate?.id || candidate?._id)}
-											className={`rounded-xl px-4 py-2 text-xs font-semibold text-white transition ${suggestionsLoading ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'}`}
+											className={`suggestions-action-primary rounded-xl px-4 py-2 text-xs font-semibold text-white transition ${suggestionsLoading ? 'opacity-60' : 'hover:-translate-y-[1px]'}`}
 										>
 											{suggestionsLoading ? 'Analyse…' : 'Analyser mon CV'}
 										</button>
@@ -2265,45 +2330,45 @@ function DashboardCand() {
 
 								{suggestionsData ? (
 									<div className='mt-5 space-y-4'>
-										<div className='grid gap-4 sm:grid-cols-3'>
-											<div className='rounded-2xl border border-[#d7e9f8] bg-white p-4'>
-												<p className='text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Points forts</p>
-												<p className='mt-1 text-3xl font-black text-[#0d355b]'>{normalizedSuggestions.strengths.length}</p>
+										<div className='suggestions-fade-up grid gap-4 sm:grid-cols-3'>
+											<div className='suggestions-metric-card rounded-2xl border p-4'>
+												<p className='suggestions-metric-label text-xs font-bold uppercase tracking-wide'>Points forts</p>
+												<p className='suggestions-metric-value mt-1 text-3xl font-black'>{normalizedSuggestions.strengths.length}</p>
 											</div>
-											<div className='rounded-2xl border border-[#d7e9f8] bg-white p-4'>
-												<p className='text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Catégories</p>
-												<p className='mt-1 text-3xl font-black text-[#0d355b]'>{Object.keys(normalizedSuggestions.recommendationsByCategory).length}</p>
+											<div className='suggestions-metric-card rounded-2xl border p-4'>
+												<p className='suggestions-metric-label text-xs font-bold uppercase tracking-wide'>Catégories</p>
+												<p className='suggestions-metric-value mt-1 text-3xl font-black'>{Object.keys(normalizedSuggestions.recommendationsByCategory).length}</p>
 											</div>
-											<div className='rounded-2xl border border-[#d7e9f8] bg-gradient-to-br from-[#0f2742] to-[#0a5f88] p-4'>
-												<p className='text-xs font-bold uppercase tracking-wide text-cyan-100'>Rôle détecté</p>
+											<div className='suggestions-metric-card suggestions-metric-card--accent rounded-2xl border p-4'>
+												<p className='suggestions-metric-label text-xs font-bold uppercase tracking-wide'>Rôle détecté</p>
 												<p className='mt-1 text-base font-black text-white'>{normalizedSuggestions.detectedRole || 'Non déterminé'}</p>
 											</div>
 										</div>
 
 										<div className='grid gap-4 xl:grid-cols-[0.92fr_1.28fr]'>
 											<div className='space-y-4'>
-												<div className='rounded-2xl border border-[#d7e9f8] bg-white p-4'>
-													<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>SYNTHÈSE</p>
-													<p className='mt-2 text-xs font-semibold text-slate-600'>Lecture rapide des points forts de votre CV.</p>
+												<div className='suggestions-panel suggestions-fade-up rounded-2xl border p-4'>
+													<p className='suggestions-panel-title text-xs font-black tracking-[0.12em]'>SYNTHÈSE</p>
+													<p className='suggestions-panel-hint mt-2 text-xs font-semibold'>Lecture rapide des points forts de votre CV.</p>
 													{normalizedSuggestions.strengths.length > 0 ? (
-														<ul className='mt-3 list-disc space-y-1 pl-5 text-sm text-slate-700'>
+														<ul className='suggestions-body-text mt-3 list-disc space-y-1 pl-5 text-sm'>
 															{normalizedSuggestions.strengths.map((point, idx) => (
 																<li key={`strength-${idx}`}>{point}</li>
 															))}
 														</ul>
 													) : (
-														<p className='mt-2 text-sm leading-7 text-slate-700'>{normalizedSuggestions.summary || '—'}</p>
+														<p className='suggestions-body-text mt-2 text-sm leading-7'>{normalizedSuggestions.summary || '—'}</p>
 													)}
 													{normalizedSuggestions.summary && normalizedSuggestions.strengths.length > 0 ? (
-														<div className='mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700'>
-															<p className='text-xs font-black tracking-[0.12em] text-slate-600'>Résumé global</p>
+														<div className='suggestions-summary-box mt-4 rounded-xl border px-3 py-2 text-sm'>
+															<p className='suggestions-panel-title text-xs font-black tracking-[0.12em]'>Résumé global</p>
 															<p className='mt-2 leading-7'>{normalizedSuggestions.summary}</p>
 														</div>
 													) : null}
 												</div>
 
-												<div className='rounded-2xl border border-[#d7e9f8] bg-white p-4'>
-													<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>PROFIL</p>
+												<div className='suggestions-panel suggestions-fade-up rounded-2xl border p-4'>
+													<p className='suggestions-panel-title text-xs font-black tracking-[0.12em]'>PROFIL</p>
 													<div className='mt-3 flex flex-wrap gap-2'>
 														{normalizedSuggestions.detectedRole ? <Badge variant='cyan'>{normalizedSuggestions.detectedRole}</Badge> : null}
 														{normalizedSuggestions.detectedLanguage ? <Badge variant='slate'>{normalizedSuggestions.detectedLanguage}</Badge> : null}
@@ -2312,17 +2377,17 @@ function DashboardCand() {
 												</div>
 											</div>
 
-											<div className='rounded-2xl border border-[#d7e9f8] bg-white p-4'>
+											<div className='suggestions-reco-panel suggestions-fade-up rounded-2xl border p-4'>
 												<div className='flex items-center justify-between gap-3'>
-													<p className='text-xs font-black tracking-[0.12em] text-[#0d355b]'>RECOMMANDATIONS</p>
-													<p className='text-xs font-semibold text-slate-500'>Par catégories</p>
+													<p className='suggestions-panel-title text-xs font-black tracking-[0.12em]'>RECOMMANDATIONS</p>
+													<p className='suggestions-panel-hint text-xs font-semibold'>Par catégories</p>
 												</div>
-												<p className='mt-2 text-xs font-semibold text-slate-600'>Améliorations actionnables, organisées de façon claire.</p>
-												<div className='mt-4 space-y-3'>
+												<p className='suggestions-panel-hint mt-2 text-xs font-semibold'>Améliorations actionnables, organisées de façon claire.</p>
+												<div className='suggestions-reco-scroll mt-4 space-y-3'>
 													{Object.keys(normalizedSuggestions.recommendationsByCategory).length > 0 ? (
 														Object.entries(normalizedSuggestions.recommendationsByCategory).map(([category, items]) => (
-															<div key={category} className='rounded-2xl border border-slate-200 bg-slate-50 p-4'>
-																<p className='text-sm font-black text-[#103b62]'>{category}</p>
+															<div key={category} className='suggestions-category-card rounded-2xl border p-4'>
+																<p className='suggestions-category-title text-sm font-black'>{category}</p>
 																<div className='mt-3 space-y-3'>
 																	{(items || []).map((s, idx) => {
 																		const title = s?.title || s?.label || 'Suggestion'
@@ -2330,19 +2395,19 @@ function DashboardCand() {
 																		const recommendation = s?.recommendation || s?.example || ''
 																		const priority = s?.priority
 																		return (
-																			<div key={`${category}-${title}-${idx}`} className='rounded-xl border border-slate-200 bg-white p-4'>
+																			<div key={`${category}-${title}-${idx}`} className='suggestions-item-card rounded-xl border p-4'>
 																				<div className='flex items-start justify-between gap-3'>
-																					<p className='text-sm font-black text-[#103b62]'>{title}</p>
+																					<p className='suggestions-item-title text-sm font-black'>{title}</p>
 																					{priority ? <Badge variant={priority === 'high' ? 'amber' : priority === 'low' ? 'slate' : 'blue'}>{priority}</Badge> : null}
 																				</div>
 																				{missing ? (
-																					<p className='mt-2 text-sm text-slate-700'>
-																						<span className='font-bold text-slate-700'>Manque / problème:</span> {missing}
+																					<p className='suggestions-item-text mt-2 text-sm'>
+																						<span className='suggestions-item-title font-bold'>Manque / problème:</span> {missing}
 																					</p>
 																				) : null}
 																				{recommendation ? (
-																					<div className='mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700'>
-																						<span className='font-bold text-slate-700'>Recommandation:</span> {recommendation}
+																					<div className='suggestions-item-callout mt-3 rounded-xl border px-3 py-2 text-sm'>
+																						<span className='suggestions-item-title font-bold'>Recommandation:</span> {recommendation}
 																					</div>
 																				) : null}
 																			</div>
@@ -2352,7 +2417,7 @@ function DashboardCand() {
 															</div>
 														))
 													) : (
-														<p className='text-sm font-semibold text-slate-600'>Aucune suggestion disponible.</p>
+														<p className='suggestions-empty-text text-sm font-semibold'>Aucune suggestion disponible.</p>
 													)}
 												</div>
 											</div>
@@ -2543,11 +2608,35 @@ function DashboardCand() {
 											<div className='grid gap-3 sm:grid-cols-2'>
 												<div>
 													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Pays</label>
-													<input
-														value={settingsForm.country}
-														onChange={(e) => updateSettingsField('country', e.target.value)}
+													<select
+														value={selectedCountryValue}
+														onChange={(e) => {
+															const nextValue = e.target.value
+															if (nextValue === SETTINGS_COUNTRY_OTHER) {
+																updateSettingsField('country', SETTINGS_COUNTRY_OTHER)
+																return
+															}
+															updateSettingsField('country', nextValue)
+														}}
 														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
-													/>
+														style={{ fontFamily: COUNTRY_EMOJI_FONT }}
+													>
+														<option value=''>Sélectionnez votre pays</option>
+														{SETTINGS_COUNTRIES.map((item) => (
+															<option key={item.value} value={item.value}>
+																{item.label}
+															</option>
+														))}
+														<option value={SETTINGS_COUNTRY_OTHER}>🌍 Autre (saisie manuelle)</option>
+													</select>
+													{isCustomCountry ? (
+														<input
+															value={settingsForm.country === SETTINGS_COUNTRY_OTHER ? '' : settingsForm.country}
+															onChange={(e) => updateSettingsField('country', e.target.value)}
+															placeholder='Saisissez votre pays'
+															className='mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
+														/>
+													) : null}
 												</div>
 												<div>
 													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Date de naissance</label>
@@ -2727,21 +2816,6 @@ function DashboardCand() {
 
 								{!dashboardLoading && !dashboardError && dashboardStats && (
 									<div className='mt-5 space-y-4'>
-										<div className='grid gap-4 sm:grid-cols-3'>
-											<div className='rounded-2xl border border-[#d7e9f8] bg-gradient-to-br from-[#eef8ff] to-[#e2f3ff] p-4'>
-												<p className='text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Candidatures</p>
-												<p className='mt-1 text-3xl font-black text-[#0d355b]'>{pipelineStats.appliedCount}</p>
-											</div>
-											<div className='rounded-2xl border border-[#d7e9f8] bg-gradient-to-br from-[#f2fbf7] to-[#e6f8ef] p-4'>
-												<p className='text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Entretiens</p>
-												<p className='mt-1 text-3xl font-black text-[#0d355b]'>{pipelineStats.interviewsCount}</p>
-											</div>
-											<div className='rounded-2xl border border-[#d7e9f8] bg-gradient-to-br from-[#fff8ef] to-[#fff2df] p-4'>
-												<p className='text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Conversion</p>
-												<p className='mt-1 text-3xl font-black text-[#0d355b]'>{pipelineStats.conversionRate}%</p>
-											</div>
-										</div>
-
 										<div className='grid gap-4 lg:grid-cols-2'>
 											<div className='rounded-2xl border border-[#d7e9f8] bg-gradient-to-br from-[#f0fbff] to-[#dff7ff] p-4'>
 												<div className='flex items-center justify-between gap-2'>

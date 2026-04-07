@@ -1,8 +1,31 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { assets } from '../assets/assets'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+const SIGNUP_COUNTRY_OTHER = '__OTHER__'
+const SIGNUP_COUNTRIES = [
+	{ value: 'Tunisie', label: 'Tunisie', code: 'tn' },
+	{ value: 'France', label: 'France', code: 'fr' },
+	{ value: 'Algérie', label: 'Algérie', code: 'dz' },
+	{ value: 'Maroc', label: 'Maroc', code: 'ma' },
+	{ value: 'Égypte', label: 'Égypte', code: 'eg' },
+	{ value: 'Belgique', label: 'Belgique', code: 'be' },
+	{ value: 'Suisse', label: 'Suisse', code: 'ch' },
+	{ value: 'Canada', label: 'Canada', code: 'ca' },
+	{ value: 'Allemagne', label: 'Allemagne', code: 'de' },
+	{ value: 'Italie', label: 'Italie', code: 'it' },
+	{ value: 'Espagne', label: 'Espagne', code: 'es' },
+	{ value: 'Portugal', label: 'Portugal', code: 'pt' },
+	{ value: 'Royaume-Uni', label: 'Royaume-Uni', code: 'gb' },
+	{ value: 'Pays-Bas', label: 'Pays-Bas', code: 'nl' },
+	{ value: 'Suède', label: 'Suède', code: 'se' },
+	{ value: 'États-Unis', label: 'États-Unis', code: 'us' },
+	{ value: 'Émirats arabes unis', label: 'Émirats arabes unis', code: 'ae' },
+	{ value: 'Arabie saoudite', label: 'Arabie saoudite', code: 'sa' },
+	{ value: 'Qatar', label: 'Qatar', code: 'qa' },
+	{ value: 'Turquie', label: 'Turquie', code: 'tr' },
+]
 
 function CnnxCand() {
 	const navigate = useNavigate()
@@ -15,6 +38,8 @@ function CnnxCand() {
 	const [signupLoading, setSignupLoading] = useState(false)
 	const [authError, setAuthError] = useState('')
 	const [success, setSuccess] = useState(false)
+	const [isCountryMenuOpen, setIsCountryMenuOpen] = useState(false)
+	const countryMenuRef = useRef(null)
 
 	const [loginData, setLoginData] = useState({
 		email: '',
@@ -51,6 +76,26 @@ function CnnxCand() {
 		if (passwordScore === 3) return { label: 'Bon', color: 'bg-lime-500', width: 'w-3/4' }
 		return { label: 'Tres fort', color: 'bg-emerald-500', width: 'w-full' }
 	}, [passwordScore])
+
+	const isSignupCustomCountry = useMemo(() => {
+		const value = String(signupData.country || '').trim()
+		if (!value) return false
+		return !SIGNUP_COUNTRIES.some((item) => item.value === value)
+	}, [signupData.country])
+
+	const selectedSignupCountry = useMemo(() => {
+		return SIGNUP_COUNTRIES.find((item) => item.value === signupData.country) || null
+	}, [signupData.country])
+
+	useEffect(() => {
+		const handleOutsideClick = (event) => {
+			if (countryMenuRef.current && !countryMenuRef.current.contains(event.target)) {
+				setIsCountryMenuOpen(false)
+			}
+		}
+		document.addEventListener('mousedown', handleOutsideClick)
+		return () => document.removeEventListener('mousedown', handleOutsideClick)
+	}, [])
 
 	const updateSignupField = (field, value) => {
 		setSignupData((prev) => ({ ...prev, [field]: value }))
@@ -118,8 +163,13 @@ function CnnxCand() {
 		setAuthError('')
 
 		if (!signupData.password || signupData.password !== signupData.confirmPassword) return
+		if (!String(signupData.country || '').trim()) {
+			setAuthError('Veuillez sélectionner votre pays.')
+			return
+		}
 
 		try {
+			const countryToSave = signupData.country === SIGNUP_COUNTRY_OTHER ? '' : signupData.country
 			setSignupLoading(true)
 			const response = await fetch(`${API_BASE}/candidates/register`, {
 				method: 'POST',
@@ -128,7 +178,7 @@ function CnnxCand() {
 					lastName: signupData.lastName,
 					firstName: signupData.firstName,
 					email: signupData.email,
-					country: signupData.country,
+					country: countryToSave,
 					birthDate: signupData.birthDate,
 					professionalTitle: signupData.professionalTitle,
 					sector: signupData.sector,
@@ -354,13 +404,70 @@ function CnnxCand() {
 										<div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
 											<div>
 												<label className='label'>Pays</label>
-												<input
-													type='text'
-													required
-													value={signupData.country}
-													onChange={(e) => updateSignupField('country', e.target.value)}
-													className='input'
-												/>
+												<div className='relative' ref={countryMenuRef}>
+													<button
+														type='button'
+														onClick={() => setIsCountryMenuOpen((prev) => !prev)}
+														className='input flex items-center justify-between text-left'
+													>
+														<span className='flex items-center gap-2'>
+															{selectedSignupCountry ? (
+																<img
+																	src={`https://flagcdn.com/w40/${selectedSignupCountry.code}.png`}
+																	alt={selectedSignupCountry.label}
+																	className='h-4 w-6 rounded-[2px] border border-slate-200 object-cover'
+																/>
+															) : (
+																<span className='text-slate-400'>🌐</span>
+															)}
+															<span>{selectedSignupCountry ? selectedSignupCountry.label : 'Sélectionner votre pays'}</span>
+														</span>
+														<span className='text-slate-500'>▾</span>
+													</button>
+													{isCountryMenuOpen ? (
+														<div className='absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-lg'>
+															{SIGNUP_COUNTRIES.map((item) => (
+																<button
+																	key={item.value}
+																	type='button'
+																	onClick={() => {
+																		updateSignupField('country', item.value)
+																		setIsCountryMenuOpen(false)
+																	}}
+																	className='flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-slate-50'
+																>
+																	<img
+																		src={`https://flagcdn.com/w40/${item.code}.png`}
+																		alt={item.label}
+																		className='h-4 w-6 rounded-[2px] border border-slate-200 object-cover'
+																	/>
+																	<span>{item.label}</span>
+																</button>
+															))}
+															<button
+																type='button'
+																onClick={() => {
+																	updateSignupField('country', SIGNUP_COUNTRY_OTHER)
+																	setIsCountryMenuOpen(false)
+																}}
+																className='flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-slate-50'
+															>
+																<span>🌍</span>
+																<span>Autre (saisie manuelle)</span>
+															</button>
+														</div>
+													) : null}
+												</div>
+												{isSignupCustomCountry ? (
+													<input
+														type='text'
+														required
+														value={signupData.country === SIGNUP_COUNTRY_OTHER ? '' : signupData.country}
+														onChange={(e) => updateSignupField('country', e.target.value)}
+														placeholder='Saisissez votre pays'
+														className='input mt-2'
+													/>
+												) : null}
 											</div>
 											<div>
 												<label className='label'>Date de naissance</label>
