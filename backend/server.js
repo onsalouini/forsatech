@@ -128,6 +128,101 @@ function sha256Hex(value) {
   return crypto.createHash('sha256').update(String(value)).digest('hex');
 }
 
+function formatDateTimeFr(date) {
+  if (!date || !(date instanceof Date)) return '';
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('fr-FR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+async function sendInterviewEmailSafe(candidateEmail, candidateName, recruiterName, recruiterEmail, recruiterCompany, interviewDate, mode, location, meetingLink, offerTitle, notes) {
+  const email = normalizeEmail(candidateEmail);
+  if (!isValidEmail(email)) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[interview-email] Adresse email invalide:', { email });
+    }
+    return false;
+  }
+
+  const transporter = getMailerTransporter();
+  if (!transporter) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[interview-email] SMTP non configuré');
+    }
+    return false;
+  }
+
+  try {
+    const whenLabel = formatDateTimeFr(interviewDate);
+    const modeLabel = mode === 'Présentiel' ? 'Présentiel' : 'En ligne';
+    const locationOrLink = mode === 'Présentiel' ? location : meetingLink;
+
+    const subject = offerTitle
+      ? `Entretien planifié - ${offerTitle}`
+      : 'Entretien planifié';
+
+    const text = [
+      `Bonjour ${candidateName},`,
+      '',
+      'Un entretien a été planifié pour votre candidature.',
+      `Date: ${whenLabel}`,
+      `Mode: ${modeLabel}`,
+      locationOrLink ? (mode === 'Présentiel' ? `Lieu: ${locationOrLink}` : `Lien: ${locationOrLink}`) : '',
+      recruiterName ? `Recruteur: ${recruiterName}` : '',
+      recruiterEmail ? `Email: ${recruiterEmail}` : '',
+      recruiterCompany ? `Entreprise: ${recruiterCompany}` : '',
+      offerTitle ? `Offre: ${offerTitle}` : '',
+      notes ? `Notes: ${notes}` : '',
+      '',
+      'Équipe AIR',
+    ]
+      .filter((line) => line.trim().length > 0)
+      .join('\n');
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <h2>Entretien planifié</h2>
+        <p>Bonjour <strong>${escapeHtml(candidateName)}</strong>,</p>
+        <p>Un entretien a été planifié pour votre candidature.</p>
+        <div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 20px 0;">
+          <p><strong>Date:</strong> ${escapeHtml(whenLabel)}</p>
+          <p><strong>Mode:</strong> ${escapeHtml(modeLabel)}</p>
+          ${locationOrLink ? `<p><strong>${mode === 'Présentiel' ? 'Lieu' : 'Lien'}:</strong> ${escapeHtml(locationOrLink)}</p>` : ''}
+          ${recruiterName ? `<p><strong>Recruteur:</strong> ${escapeHtml(recruiterName)}</p>` : ''}
+          ${recruiterEmail ? `<p><strong>Email:</strong> <a href="mailto:${escapeHtml(recruiterEmail)}">${escapeHtml(recruiterEmail)}</a></p>` : ''}
+          ${recruiterCompany ? `<p><strong>Entreprise:</strong> ${escapeHtml(recruiterCompany)}</p>` : ''}
+          ${offerTitle ? `<p><strong>Offre:</strong> ${escapeHtml(offerTitle)}</p>` : ''}
+          ${notes ? `<p><strong>Notes:</strong> ${escapeHtml(notes)}</p>` : ''}
+        </div>
+        <p>Bonne chance!</p>
+        <p>Équipe AIR</p>
+      </div>
+    `;
+
+    await transporter.sendMail({
+      from: getFromAddress(),
+      to: email,
+      subject,
+      text,
+      html,
+    });
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[interview-email] Email envoyé avec succès à:', email);
+    }
+
+    return true;
+  } catch (error) {
+    console.error('[interview-email] Erreur lors de l\'envoi:', error?.message);
+    return false;
+  }
+}
+
 const passwordResetRateLimit = {
   // in-memory rate limiting (sufficient for single-instance dev)
   windowMs: 10 * 60 * 1000,
@@ -3589,7 +3684,7 @@ app.post('/api/interviews', async (req, res) => {
     await interview.save();
 
     const offer = jobOfferId ? await JobOffer.findById(jobOfferId).select('title').catch(() => null) : null;
-    const recruiter = await Recruiter.findById(recruiterId).select('firstName lastName company').catch(() => null);
+    const recruiter = await Recruiter.findById(recruiterId).select('firstName lastName company email').catch(() => null);
     const recruiterName = recruiter ? `${recruiter.firstName || ''} ${recruiter.lastName || ''}`.trim() : '';
     const offerTitle = offer?.title || '';
 
@@ -3620,6 +3715,32 @@ app.post('/api/interviews', async (req, res) => {
       location: safeLocation,
     });
     await notification.save();
+
+    // Envoyer un email au candidat (non-bloquant)
+    const candidateForEmail = await Candidate.findById(candidateId)
+      .select('firstName lastName email')
+      .lean()
+      .catch(() => null);
+
+    if (candidateForEmail) {
+      const fullCandidateName = `${candidateForEmail.firstName || ''} ${candidateForEmail.lastName || ''}`.trim() || 'Candidat';
+      const recruiterEmail = recruiter?.email || '';
+      sendInterviewEmailSafe(
+        candidateForEmail.email,
+        fullCandidateName,
+        recruiterName,
+        recruiterEmail,
+        recruiter?.company || '',
+        parsed,
+        normalizedMode,
+        safeLocation,
+        safeMeetingLink,
+        offerTitle,
+        notes
+      ).catch((err) => {
+        console.error('[interview-email] Background send failed:', err);
+      });
+    }
 
     return res.status(201).json({
       success: true,
