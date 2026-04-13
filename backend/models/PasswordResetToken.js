@@ -9,6 +9,12 @@ const passwordResetTokenSchema = new mongoose.Schema(
 			trim: true,
 			index: true,
 		},
+		purpose: {
+			type: String,
+			enum: ['password_reset', 'password_change'],
+			default: 'password_reset',
+			index: true,
+		},
 		codeHash: {
 			type: String,
 			required: true,
@@ -33,5 +39,6 @@ const passwordResetTokenSchema = new mongoose.Schema(
 
 // TTL index: automatically deletes expired tokens.
 passwordResetTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 })
+passwordResetTokenSchema.index({ email: 1, purpose: 1, createdAt: -1 })
 
 module.exports = mongoose.model('PasswordResetToken', passwordResetTokenSchema)

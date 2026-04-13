@@ -358,6 +358,11 @@ function DashboardCand() {
 	const [salaryMin, setSalaryMin] = useState('')
 	const [salaryMax, setSalaryMax] = useState('')
 	const [experienceMinYears, setExperienceMinYears] = useState('')
+	const [sortBy, setSortBy] = useState('match')
+	const [contractFilter, setContractFilter] = useState('all')
+	const [workModeFilter, setWorkModeFilter] = useState('all')
+	const [matchFilter, setMatchFilter] = useState('all')
+	const [showSavedOnly, setShowSavedOnly] = useState(false)
 	const [currentTime, setCurrentTime] = useState(new Date())
 	const [jobs, setJobs] = useState([])
 	const [candidacies, setCandidacies] = useState([])
@@ -442,10 +447,18 @@ function DashboardCand() {
 		currentPassword: '',
 		newPassword: '',
 		confirmPassword: '',
+		verificationCode: '',
 	})
 	const [passwordSaving, setPasswordSaving] = useState(false)
 	const [passwordMessage, setPasswordMessage] = useState('')
 	const [passwordError, setPasswordError] = useState('')
+	const [passwordCodeSending, setPasswordCodeSending] = useState(false)
+	const [appFeedbackForm, setAppFeedbackForm] = useState({ rating: 0, comment: '' })
+	const [appFeedbackSaving, setAppFeedbackSaving] = useState(false)
+	const [appFeedbackMessage, setAppFeedbackMessage] = useState('')
+	const [appFeedbackError, setAppFeedbackError] = useState('')
+	const [appFeedbackSummary, setAppFeedbackSummary] = useState({ averageRating: null, totalFeedbacks: 0 })
+	const [appFeedbackOpen, setAppFeedbackOpen] = useState(false)
 
 	const normalizedSuggestions = useMemo(() => normalizeSuggestionsPayload(suggestionsData), [suggestionsData])
 	const activeCvMeta = useMemo(() => cvHistory.find((x) => x?.isActive) || null, [cvHistory])
@@ -717,6 +730,13 @@ function DashboardCand() {
 		}
 	}
 
+	const handleJoinInterview = (meetingLink, interviewId) => {
+		if (!meetingLink) return
+		const displayName = `${candidate?.firstName || ''} ${candidate?.lastName || ''}`.trim() || candidate?.email || 'Candidat AIR'
+		const interviewQuery = interviewId ? `&interviewId=${encodeURIComponent(interviewId)}` : ''
+		navigate(`/meet?url=${encodeURIComponent(meetingLink)}&name=${encodeURIComponent(displayName)}&role=candidat${interviewQuery}`)
+	}
+
 	const menuGroups = useMemo(
 		() => [
 			{
@@ -893,8 +913,8 @@ function DashboardCand() {
 			setPasswordError('Session candidat invalide.')
 			return
 		}
-		if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
-			setPasswordError('Tous les champs mot de passe sont requis.')
+		if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword || !passwordForm.verificationCode) {
+			setPasswordError('Tous les champs, y compris le code de verification, sont requis.')
 			return
 		}
 		if (passwordForm.newPassword !== passwordForm.confirmPassword) {
@@ -914,6 +934,7 @@ function DashboardCand() {
 				body: JSON.stringify({
 					currentPassword: passwordForm.currentPassword,
 					newPassword: passwordForm.newPassword,
+					verificationCode: passwordForm.verificationCode,
 				}),
 			})
 			const data = await res.json().catch(() => ({}))
@@ -922,11 +943,88 @@ function DashboardCand() {
 				return
 			}
 			setPasswordMessage(data?.message || 'Mot de passe mis à jour.')
-			setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
+			setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '', verificationCode: '' })
 		} catch {
 			setPasswordError('Serveur indisponible. Vérifiez que le backend tourne.')
 		} finally {
 			setPasswordSaving(false)
+		}
+	}
+
+	const handleRequestPasswordCode = async () => {
+		setPasswordMessage('')
+		setPasswordError('')
+		const candidateId = candidate?.id || candidate?._id
+		if (!candidateId) {
+			setPasswordError('Session candidat invalide.')
+			return
+		}
+
+		setPasswordCodeSending(true)
+		try {
+			const res = await fetch(`${API_BASE}/candidates/${candidateId}/password/otp/request`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+			})
+			const data = await res.json().catch(() => ({}))
+			if (!res.ok || !data?.success) {
+				setPasswordError(data?.message || "Impossible d'envoyer le code.")
+				return
+			}
+			setPasswordMessage(data?.message || 'Code de verification envoye par email.')
+		} catch {
+			setPasswordError('Serveur indisponible. Vérifiez que le backend tourne.')
+		} finally {
+			setPasswordCodeSending(false)
+		}
+	}
+
+	const handleSubmitAppFeedback = async (e) => {
+		e.preventDefault()
+		setAppFeedbackMessage('')
+		setAppFeedbackError('')
+
+		const candidateId = candidate?.id || candidate?._id
+		if (!candidateId) {
+			setAppFeedbackError('Session candidat invalide.')
+			return
+		}
+		if (!Number.isFinite(appFeedbackForm.rating) || appFeedbackForm.rating < 1 || appFeedbackForm.rating > 5) {
+			setAppFeedbackError('Veuillez choisir une note entre 1 et 5 etoiles.')
+			return
+		}
+
+		setAppFeedbackSaving(true)
+		try {
+			const res = await fetch(`${API_BASE}/app-feedback`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					userId: candidateId,
+					userRole: 'candidate',
+					rating: appFeedbackForm.rating,
+					comment: appFeedbackForm.comment,
+				}),
+			})
+			const data = await res.json().catch(() => ({}))
+			if (!res.ok || !data?.success) {
+				setAppFeedbackError(data?.message || 'Impossible d enregistrer votre feedback.')
+				return
+			}
+
+			setAppFeedbackMessage(data?.message || 'Merci pour votre feedback.')
+			const summaryRes = await fetch(`${API_BASE}/app-feedback/summary`)
+			const summaryData = await summaryRes.json().catch(() => ({}))
+			if (summaryRes.ok && summaryData?.success && summaryData?.summary) {
+				setAppFeedbackSummary({
+					averageRating: Number.isFinite(summaryData.summary.averageRating) ? Number(summaryData.summary.averageRating) : null,
+					totalFeedbacks: Number(summaryData.summary.totalFeedbacks || 0),
+				})
+			}
+		} catch {
+			setAppFeedbackError('Serveur indisponible. Vérifiez que le backend tourne.')
+		} finally {
+			setAppFeedbackSaving(false)
 		}
 	}
 
@@ -948,6 +1046,46 @@ function DashboardCand() {
 			navigate('/connecter')
 		}
 	}, [navigate])
+
+	useEffect(() => {
+		const candidateId = candidate?.id || candidate?._id
+		if (!candidateId) return
+
+		let cancelled = false
+		const fetchAppFeedback = async () => {
+			try {
+				const [mineRes, summaryRes] = await Promise.all([
+					fetch(`${API_BASE}/app-feedback/mine?userId=${encodeURIComponent(candidateId)}&userRole=candidate`),
+					fetch(`${API_BASE}/app-feedback/summary`),
+				])
+				const mineData = await mineRes.json().catch(() => ({}))
+				const summaryData = await summaryRes.json().catch(() => ({}))
+				if (cancelled) return
+
+				if (mineRes.ok && mineData?.success && mineData?.feedback) {
+					setAppFeedbackForm({
+						rating: Number(mineData.feedback.rating || 0),
+						comment: String(mineData.feedback.comment || ''),
+					})
+				}
+				if (summaryRes.ok && summaryData?.success && summaryData?.summary) {
+					setAppFeedbackSummary({
+						averageRating: Number.isFinite(summaryData.summary.averageRating) ? Number(summaryData.summary.averageRating) : null,
+						totalFeedbacks: Number(summaryData.summary.totalFeedbacks || 0),
+					})
+				}
+			} catch {
+				if (!cancelled) {
+					setAppFeedbackSummary((prev) => ({ ...prev }))
+				}
+			}
+		}
+
+		fetchAppFeedback()
+		return () => {
+			cancelled = true
+		}
+	}, [candidate?.id, candidate?._id])
 
 	useEffect(() => {
 		const candidateId = candidate?.id || candidate?._id
@@ -1502,7 +1640,15 @@ function DashboardCand() {
 		return 'Bonsoir'
 	}, [currentTime])
 
-	const filtered = useMemo(() => {
+	const contractOptions = useMemo(() => {
+		return Array.from(new Set(jobs.map((j) => String(j?.type || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b))
+	}, [jobs])
+
+	const workModeOptions = useMemo(() => {
+		return Array.from(new Set(jobs.map((j) => String(j?.workMode || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b))
+	}, [jobs])
+
+	const visibleJobs = useMemo(() => {
 		const q = searchQuery.trim().toLowerCase()
 		const hasMinSalary = String(salaryMin || '').trim() !== ''
 		const hasMaxSalary = String(salaryMax || '').trim() !== ''
@@ -1512,10 +1658,21 @@ function DashboardCand() {
 		const maxSalaryValue = hasMaxSalary ? Number(salaryMax) : null
 		const minExpValue = hasMinExp ? Number(experienceMinYears) : null
 
-		return jobs.filter((j) => {
+		const list = jobs.filter((j) => {
 			if (q) {
-				const hay = `${j.title} ${j.location} ${j.company} ${j.desc || ''}`.toLowerCase()
+				const hay = `${j.title} ${j.location} ${j.company} ${j.desc || ''} ${(j.tags || []).join(' ')}`.toLowerCase()
 				if (!hay.includes(q)) return false
+			}
+
+			if (showSavedOnly && !savedJobs.has(j.id)) return false
+			if (contractFilter !== 'all' && String(j?.type || '') !== contractFilter) return false
+			if (workModeFilter !== 'all' && String(j?.workMode || '') !== workModeFilter) return false
+
+			if (matchFilter !== 'all') {
+				const score = Number.isFinite(j?.matchScore) ? j.matchScore : -1
+				if (matchFilter === '70' && score < 70) return false
+				if (matchFilter === '45' && score < 45) return false
+				if (matchFilter === 'known' && score < 0) return false
 			}
 
 			if (hasMinSalary || hasMaxSalary) {
@@ -1534,7 +1691,63 @@ function DashboardCand() {
 
 			return true
 		})
-	}, [searchQuery, salaryMin, salaryMax, experienceMinYears, jobs])
+
+		const salaryValue = (job) => {
+			const range = parseSalaryRange(job?.salary)
+			if (!range) return -1
+			return (range.min + range.max) / 2
+		}
+
+		list.sort((a, b) => {
+			const aMatch = Number.isFinite(a?.matchScore) ? a.matchScore : -1
+			const bMatch = Number.isFinite(b?.matchScore) ? b.matchScore : -1
+			const aDate = new Date(a?.createdAt || 0).getTime() || 0
+			const bDate = new Date(b?.createdAt || 0).getTime() || 0
+			const aSalary = salaryValue(a)
+			const bSalary = salaryValue(b)
+
+			if (sortBy === 'recent') {
+				if (bDate !== aDate) return bDate - aDate
+				return bMatch - aMatch
+			}
+			if (sortBy === 'salaryDesc') {
+				if (bSalary !== aSalary) return bSalary - aSalary
+				return bMatch - aMatch
+			}
+			if (sortBy === 'salaryAsc') {
+				if (aSalary !== bSalary) return aSalary - bSalary
+				return bMatch - aMatch
+			}
+
+			if (bMatch !== aMatch) return bMatch - aMatch
+			return bDate - aDate
+		})
+
+		return list
+	}, [searchQuery, salaryMin, salaryMax, experienceMinYears, showSavedOnly, contractFilter, workModeFilter, matchFilter, sortBy, jobs, savedJobs])
+
+	const hasActiveOfferFilters = useMemo(() => {
+		return Boolean(
+			searchQuery.trim() ||
+			salaryMin ||
+			salaryMax ||
+			experienceMinYears ||
+			showSavedOnly ||
+			contractFilter !== 'all' ||
+			workModeFilter !== 'all' ||
+			matchFilter !== 'all' ||
+			sortBy !== 'match'
+		)
+	}, [searchQuery, salaryMin, salaryMax, experienceMinYears, showSavedOnly, contractFilter, workModeFilter, matchFilter, sortBy])
+
+	useEffect(() => {
+		if (selectedView !== 'offres') return
+		if (visibleJobs.length === 0) return
+		const selectedVisible = visibleJobs.some((j) => j.id === selectedJobId)
+		if (selectedVisible) return
+		setSelectedJobId(visibleJobs[0].id)
+		setApplyStatus(null)
+	}, [selectedView, visibleJobs, selectedJobId])
 
 	const selectedJob = useMemo(() => {
 		if (!selectedJobId && jobs.length > 0) return jobs[0]
@@ -1886,85 +2099,164 @@ function DashboardCand() {
 										<p className='text-sm font-semibold text-rose-800'>{loadError}</p>
 									</div>
 								) : null}
-								<div className='overflow-hidden rounded-2xl border border-[#b9d5ea] bg-gradient-to-br from-[#f8fcff] via-[#f2f9ff] to-[#e8f3fc] shadow-[0_12px_28px_rgba(8,51,93,0.1)]'>
-									<div className='flex flex-wrap items-center justify-between gap-2 border-b border-[#0d355b]/25 bg-gradient-to-r from-[#0d355b] to-[#0a5f88] px-4 py-3'>
-										<p className='text-[11px] font-black tracking-[0.12em] text-cyan-100'>RECHERCHE ET FILTRES</p>
-										<p className='text-[11px] font-semibold text-cyan-50/90'>Trouvez les offres qui correspondent à votre profil</p>
+								<div className='overflow-hidden rounded-3xl border border-[#9fc3e1] bg-gradient-to-br from-[#f8fcff] via-[#eef7ff] to-[#e4f1fb] shadow-[0_16px_36px_rgba(8,51,93,0.12)]'>
+									<div className='relative border-b border-[#0d355b]/20 bg-gradient-to-r from-[#001d3e] via-[#0d355b] to-[#0a5f88] px-5 py-4'>
+										<div className='absolute -right-12 -top-10 h-28 w-28 rounded-full bg-cyan-300/20 blur-2xl' />
+										<div className='relative flex flex-wrap items-center justify-between gap-2'>
+											<div>
+												<p className='text-[11px] font-black tracking-[0.14em] text-cyan-100'>RECHERCHE ET FILTRES</p>
+												<p className='mt-1 text-xs font-semibold text-cyan-50/90'>Affinez les offres selon votre profil et vos priorités</p>
+											</div>
+											<Badge variant='cyan'>{visibleJobs.length} résultats</Badge>
+										</div>
 									</div>
 
-									<div className='space-y-3 p-4'>
+									<div className='space-y-4 p-4 sm:p-5'>
+										<div className='grid gap-3 xl:grid-cols-[1.15fr_0.45fr_0.4fr]'>
+											<div className='flex items-center gap-3 rounded-2xl border border-[#c6dff2] bg-white px-4 py-3 shadow-[0_4px_12px_rgba(8,51,93,0.05)]'>
+												<span className='text-lg text-[#4f7ea6]'>🔎</span>
+												<input
+													type='text'
+													placeholder='Poste, entreprise, lieu, compétence...'
+													value={searchQuery}
+													onChange={(e) => setSearchQuery(e.target.value)}
+													className='w-full bg-transparent text-sm font-semibold text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
+												/>
+												{searchQuery ? (
+													<button
+														type='button'
+														onClick={() => setSearchQuery('')}
+														className='rounded-lg border border-[#d4e5f4] bg-[#f7fbff] px-2.5 py-1 text-xs font-semibold text-[#2b587f] transition hover:bg-[#edf6ff]'
+													>
+														Effacer
+													</button>
+												) : null}
+											</div>
 
-									<div className='grid gap-3 lg:grid-cols-[1fr_220px]'>
-										<div className='flex flex-col gap-3 rounded-xl border border-[#c6dff2] bg-white px-4 py-3 sm:flex-row sm:items-center'>
-											<span className='text-lg text-[#5f89ad]'>🔍</span>
-											<input
-												type='text'
-												placeholder='Poste, entreprise, lieu, compétence…'
-												value={searchQuery}
-												onChange={(e) => setSearchQuery(e.target.value)}
-												className='w-full bg-transparent text-sm font-medium text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
-											/>
+											<select
+												value={sortBy}
+												onChange={(e) => setSortBy(e.target.value)}
+												className='rounded-2xl border border-[#c6dff2] bg-white px-4 py-3 text-sm font-semibold text-[#1e4268] outline-none shadow-[0_4px_12px_rgba(8,51,93,0.04)]'
+											>
+												<option value='match'>Tri: meilleur match</option>
+												<option value='recent'>Tri: plus récent</option>
+												<option value='salaryDesc'>Tri: salaire décroissant</option>
+												<option value='salaryAsc'>Tri: salaire croissant</option>
+											</select>
+
 											<button
 												type='button'
-												onClick={() => setSearchQuery('')}
-												className='w-full shrink-0 rounded-lg border border-[#c6dff2] bg-[#f4faff] px-3 py-1.5 text-xs font-semibold text-[#2b587f] transition hover:bg-[#e8f3ff] sm:w-auto'
+												onClick={() => setShowSavedOnly((prev) => !prev)}
+												className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+													showSavedOnly
+														? 'border-[#0a5f88] bg-[#0a5f88] text-white shadow-[0_8px_16px_rgba(10,95,136,0.28)]'
+														: 'border-[#c6dff2] bg-white text-[#1e4268] hover:bg-[#eef7ff]'
+												}`}
 											>
-												Effacer recherche
+												{showSavedOnly ? 'Favoris uniquement' : 'Afficher favoris'}
 											</button>
 										</div>
-										<select className='rounded-xl border border-[#c6dff2] bg-white px-4 py-3 text-sm font-semibold text-[#1e4268] outline-none'>
-											<option>Tri: pertinence</option>
-											<option>Tri: plus récent</option>
-											<option>Tri: rémunération</option>
-										</select>
-									</div>
 
-									<div className='mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
-										<div className='rounded-xl border border-[#c6dff2] bg-white px-4 py-3'>
-											<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>RÉMUNÉRATION MIN (TND/MOIS)</p>
-											<input
-												type='number'
-												inputMode='numeric'
-												placeholder='ex: 1200'
-												value={salaryMin}
-												onChange={(e) => setSalaryMin(e.target.value)}
-												className='mt-1 w-full bg-transparent text-sm font-semibold text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
-											/>
+										<div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
+											<div className='rounded-2xl border border-[#c6dff2] bg-white px-4 py-3'>
+												<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>TYPE DE CONTRAT</p>
+												<select
+													value={contractFilter}
+													onChange={(e) => setContractFilter(e.target.value)}
+													className='mt-1 w-full bg-transparent text-sm font-semibold text-[#173c62] outline-none'
+												>
+													<option value='all'>Tous</option>
+													{contractOptions.map((option) => (
+														<option key={option} value={option}>
+															{option}
+														</option>
+													))}
+												</select>
+											</div>
+
+											<div className='rounded-2xl border border-[#c6dff2] bg-white px-4 py-3'>
+												<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>MODE DE TRAVAIL</p>
+												<select
+													value={workModeFilter}
+													onChange={(e) => setWorkModeFilter(e.target.value)}
+													className='mt-1 w-full bg-transparent text-sm font-semibold text-[#173c62] outline-none'
+												>
+													<option value='all'>Tous</option>
+													{workModeOptions.map((option) => (
+														<option key={option} value={option}>
+															{option}
+														</option>
+													))}
+												</select>
+											</div>
+
+											<div className='rounded-2xl border border-[#c6dff2] bg-white px-4 py-3'>
+												<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>MATCH CV MINIMUM</p>
+												<select
+													value={matchFilter}
+													onChange={(e) => setMatchFilter(e.target.value)}
+													className='mt-1 w-full bg-transparent text-sm font-semibold text-[#173c62] outline-none'
+												>
+													<option value='all'>Tous</option>
+													<option value='70'>70% et +</option>
+													<option value='45'>45% et +</option>
+													<option value='known'>Match disponible</option>
+												</select>
+											</div>
+
+											<div className='rounded-2xl border border-[#c6dff2] bg-white px-4 py-3'>
+												<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>EXPÉRIENCE / SALAIRE (TND)</p>
+												<div className='mt-1 grid grid-cols-3 gap-2'>
+													<input
+														type='number'
+														inputMode='numeric'
+														placeholder='Exp min'
+														value={experienceMinYears}
+														onChange={(e) => setExperienceMinYears(e.target.value)}
+														className='w-full rounded-lg border border-[#d4e5f4] bg-[#fbfdff] px-2 py-1 text-xs font-semibold text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
+													/>
+													<input
+														type='number'
+														inputMode='numeric'
+														placeholder='Salaire min'
+														value={salaryMin}
+														onChange={(e) => setSalaryMin(e.target.value)}
+														className='w-full rounded-lg border border-[#d4e5f4] bg-[#fbfdff] px-2 py-1 text-xs font-semibold text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
+													/>
+													<input
+														type='number'
+														inputMode='numeric'
+														placeholder='Salaire max'
+														value={salaryMax}
+														onChange={(e) => setSalaryMax(e.target.value)}
+														className='w-full rounded-lg border border-[#d4e5f4] bg-[#fbfdff] px-2 py-1 text-xs font-semibold text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
+													/>
+												</div>
+											</div>
 										</div>
-										<div className='rounded-xl border border-[#c6dff2] bg-white px-4 py-3'>
-											<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>RÉMUNÉRATION MAX (TND/MOIS)</p>
-											<input
-												type='number'
-												inputMode='numeric'
-												placeholder='ex: 3000'
-												value={salaryMax}
-												onChange={(e) => setSalaryMax(e.target.value)}
-												className='mt-1 w-full bg-transparent text-sm font-semibold text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
-											/>
+
+										<div className='flex flex-wrap items-center justify-between gap-2'>
+											<p className='text-xs font-semibold text-[#4f7191]'>
+												{hasActiveOfferFilters ? 'Filtres actifs appliqués sur les offres.' : 'Aucun filtre actif.'}
+											</p>
+											<button
+												type='button'
+												onClick={() => {
+													setSearchQuery('')
+													setSalaryMin('')
+													setSalaryMax('')
+													setExperienceMinYears('')
+													setSortBy('match')
+													setContractFilter('all')
+													setWorkModeFilter('all')
+													setMatchFilter('all')
+													setShowSavedOnly(false)
+												}}
+												className='rounded-xl border border-[#001d3e] bg-[#001d3e] px-4 py-2 text-xs font-semibold text-white transition hover:opacity-95'
+											>
+												Réinitialiser
+											</button>
 										</div>
-										<div className='rounded-xl border border-[#c6dff2] bg-white px-4 py-3'>
-											<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>EXPÉRIENCE MINIMALE</p>
-											<input
-												type='number'
-												inputMode='numeric'
-												placeholder='années (ex: 2)'
-												value={experienceMinYears}
-												onChange={(e) => setExperienceMinYears(e.target.value)}
-												className='mt-1 w-full bg-transparent text-sm font-semibold text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
-											/>
-										</div>
-										<button
-											type='button'
-											onClick={() => {
-												setSalaryMin('')
-												setSalaryMax('')
-												setExperienceMinYears('')
-											}}
-											className='rounded-xl border border-[#001d3e] bg-[#001d3e] px-4 py-3 text-sm font-semibold text-white transition hover:opacity-95'
-										>
-											Réinitialiser tous les filtres
-										</button>
-									</div>
 									</div>
 								</div>
 
@@ -1972,7 +2264,7 @@ function DashboardCand() {
 									<div className='overflow-hidden rounded-2xl border border-[#b6cfe6] bg-white shadow-[0_8px_20px_rgba(8,51,93,0.08)]'>
 										<div className='flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3'>
 											<p className='text-sm font-semibold text-slate-700'>
-												<span className='font-black text-[#0d355b]'>{filtered.length}</span> offres correspondent
+												<span className='font-black text-[#0d355b]'>{visibleJobs.length}</span> offres correspondent
 											</p>
 											<p className='text-xs font-semibold text-slate-500'>
 												{cvMatchLoading ? 'Analyse CV en cours…' : cvMatchError ? 'Analyse CV indisponible' : 'Cliquez une offre pour voir le détail'}
@@ -1981,13 +2273,13 @@ function DashboardCand() {
 
 										<div className='max-h-[620px] overflow-y-auto p-4'>
 											<div className='space-y-3'>
-												{filtered.map((j) => {
+												{visibleJobs.map((j) => {
 													const active = selectedJob?.id === j.id
 													const saved = savedJobs.has(j.id)
 													return (
-														<div
+															<div
 															key={j.id}
-															className={`relative w-full rounded-2xl border border-l-4 transition ${active ? 'border-cyan-300 border-l-[#0a5f88] bg-cyan-50 shadow-[0_8px_18px_rgba(9,84,129,0.12)]' : 'border-slate-200 border-l-[#0d355b]/20 bg-white hover:bg-slate-50'}`}
+																className={`relative w-full rounded-2xl border border-l-4 transition ${active ? 'border-cyan-300 border-l-[#0a5f88] bg-gradient-to-r from-cyan-50 to-white shadow-[0_10px_20px_rgba(9,84,129,0.12)]' : 'border-slate-200 border-l-[#0d355b]/20 bg-white hover:border-[#b9d5ea] hover:bg-[#fbfdff]'}`}
 														>
 															<button
 																type='button'
@@ -1998,7 +2290,7 @@ function DashboardCand() {
 																className='w-full cursor-pointer rounded-2xl p-4 text-left'
 															>
 																<div className='flex items-start gap-3'>
-																	<div className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-xl'>
+																	<div className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-xl shadow-[0_2px_8px_rgba(15,55,94,0.1)]'>
 																		{j.emoji}
 																	</div>
 																	<div className='min-w-0 flex-1 pr-10'>
@@ -2047,7 +2339,14 @@ function DashboardCand() {
 									</div>
 
 									<div className='flex flex-col gap-4'>
-										{selectedJob && (
+										{visibleJobs.length === 0 ? (
+											<div className='rounded-2xl border border-dashed border-[#b9d5ea] bg-[#f7fbff] p-6 text-center'>
+												<p className='text-sm font-bold text-[#103b62]'>Aucune offre ne correspond à vos critères.</p>
+												<p className='mt-1 text-xs text-[#587b9c]'>Essayez de retirer un filtre ou d’élargir votre recherche.</p>
+											</div>
+										) : null}
+
+										{visibleJobs.length > 0 && selectedJob ? (
 											<div className='overflow-hidden rounded-2xl border border-[#0d355b]/25 bg-white shadow-[0_10px_24px_rgba(8,51,93,0.12)]'>
 												<div className='border-b border-[#0d355b]/15 bg-gradient-to-r from-[#f2f8ff] to-white p-5'>
 													<div className='flex items-start justify-between gap-3'>
@@ -2062,7 +2361,6 @@ function DashboardCand() {
 																</p>
 															</div>
 														</div>
-
 														<button
 															type='button'
 															onClick={(e) => toggleSave(e, selectedJob.id)}
@@ -2165,7 +2463,7 @@ function DashboardCand() {
 																</div>
 													)}
 
-													{selectedJob.cvMatch && selectedJob.cvMatch.length > 0 && (
+													{selectedJob.cvMatch && selectedJob.cvMatch.length > 0 ? (
 														<div className='mt-6'>
 															<p className='text-[12px] font-black tracking-[0.12em] text-[#0d355b]'>MOTS-CLÉS VS VOTRE CV</p>
 															<div className='mt-3 space-y-2'>
@@ -2181,18 +2479,18 @@ function DashboardCand() {
 																))}
 															</div>
 
-															{selectedJob.cvMatch.some((m) => !m.ok) && (
+															{selectedJob.cvMatch.some((m) => !m.ok) ? (
 																<div className='mt-4 rounded-2xl border border-cyan-200 bg-cyan-50 p-4'>
 																	<p className='text-sm font-semibold text-[#0a5f88]'>
 																		Conseil: Ajoutez {selectedJob.cvMatch.filter((m) => !m.ok).map((m) => m.kw).join(', ')} à votre CV avant de postuler.
 																	</p>
 																</div>
-															)}
+															) : null}
 														</div>
-													)}
+													) : null}
 												</div>
 											</div>
-										)}
+										) : null}
 									</div>
 								</div>
 							</div>
@@ -2504,9 +2802,13 @@ function DashboardCand() {
 																</div>
 															) : null}
 															{mode !== 'Présentiel' && meetingLink ? (
-																<a href={meetingLink} target='_blank' rel='noreferrer' className='mt-3 inline-block text-xs font-bold text-cyan-700 hover:underline'>
-																	Ouvrir le lien de réunion
-																</a>
+																<button
+																	type='button'
+																	onClick={() => handleJoinInterview(meetingLink, n?.interviewId?._id || n?.interviewId)}
+																	className='mt-3 inline-block text-xs font-bold text-cyan-700 hover:underline'
+																>
+																	Rejoindre dans AIR
+																</button>
 															) : null}
 															{notes ? (
 																<div className='mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700'>
@@ -2800,6 +3102,26 @@ function DashboardCand() {
 														className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
 													/>
 												</div>
+												<div>
+													<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-slate-600'>Code de verification</label>
+													<div className='grid gap-2 sm:grid-cols-[1fr_auto]'>
+														<input
+															type='text'
+															value={passwordForm.verificationCode}
+															onChange={(e) => updatePasswordField('verificationCode', e.target.value)}
+															className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-300'
+															placeholder='Code recu par email'
+														/>
+														<button
+															type='button'
+															onClick={handleRequestPasswordCode}
+															disabled={passwordCodeSending}
+															className='rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs font-semibold text-[#0d355b] hover:bg-blue-100 disabled:opacity-60'
+														>
+															{passwordCodeSending ? 'Envoi...' : 'Envoyer code'}
+														</button>
+													</div>
+												</div>
 												<div className='pt-1'>
 													<button
 														type='submit'
@@ -2811,6 +3133,7 @@ function DashboardCand() {
 												</div>
 											</form>
 										</div>
+
 									</div>
 								</div>
 							</div>
@@ -3440,6 +3763,60 @@ function DashboardCand() {
 					</div>
 				</div>
 			) : null}
+			<div className='fixed bottom-4 left-4 z-40'>
+				<button
+					type='button'
+					onClick={() => setAppFeedbackOpen((prev) => !prev)}
+					aria-label='Ouvrir le feedback AIR'
+					title='Feedback AIR'
+					className='flex h-11 w-11 items-center justify-center rounded-full bg-[#001d3e] text-lg font-black text-white shadow-xl transition hover:opacity-95'
+				>
+					★
+				</button>
+				{appFeedbackOpen ? (
+					<div className='absolute bottom-14 left-0 w-[86vw] max-w-xs rounded-2xl border border-[#b6cfe6] bg-white p-4 shadow-2xl'>
+						<div className='flex items-start justify-between gap-2'>
+							<div>
+								<p className='text-sm font-black text-[#0d355b]'>Votre avis sur AIR</p>
+								<p className='mt-1 text-xs text-slate-600'>Moyenne globale: {appFeedbackSummary.averageRating ? `${appFeedbackSummary.averageRating}/5` : '—'} • {appFeedbackSummary.totalFeedbacks} avis</p>
+							</div>
+							<button type='button' onClick={() => setAppFeedbackOpen(false)} className='rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50'>Fermer</button>
+						</div>
+
+						{appFeedbackError ? <div className='mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700'>{appFeedbackError}</div> : null}
+						{appFeedbackMessage ? <div className='mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700'>{appFeedbackMessage}</div> : null}
+
+						<form className='mt-3 space-y-3' onSubmit={handleSubmitAppFeedback}>
+							<div className='flex items-center gap-2'>
+								{[1, 2, 3, 4, 5].map((star) => (
+									<button
+										key={star}
+										type='button'
+										onClick={() => setAppFeedbackForm((prev) => ({ ...prev, rating: star }))}
+										className={`h-9 w-9 rounded-full border text-base transition ${star <= appFeedbackForm.rating ? 'border-amber-300 bg-amber-100 text-amber-600' : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300'}`}
+									>
+										★
+									</button>
+								))}
+							</div>
+							<textarea
+								rows={3}
+								value={appFeedbackForm.comment}
+								onChange={(e) => setAppFeedbackForm((prev) => ({ ...prev, comment: e.target.value }))}
+								className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-300'
+								placeholder='Votre commentaire (optionnel)'
+							/>
+							<button
+								type='submit'
+								disabled={appFeedbackSaving}
+								className={`w-full rounded-xl px-4 py-2 text-sm font-semibold text-white transition ${appFeedbackSaving ? 'bg-slate-300' : 'bg-[#001d3e] hover:opacity-95'}`}
+							>
+								{appFeedbackSaving ? 'Envoi…' : 'Envoyer'}
+							</button>
+						</form>
+					</div>
+				) : null}
+			</div>
 		</section>
 	)
 }

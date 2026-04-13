@@ -6,7 +6,8 @@ const NAV_ITEMS = [
   { id: 'fonctionnalites', label: 'Fonctionnalités' },
   { id: 'processus', label: 'Processus' },
   { id: 'pour-tous', label: 'Pour tous' },
-  { id: 'rejoindre', label: 'Rejoignez A.I.R' }
+  { id: 'rejoindre', label: 'Rejoignez A.I.R' },
+  { id: 'feedback', label: 'Feedback' }
 ]
 
 function Navbar() {

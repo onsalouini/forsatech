@@ -18,6 +18,9 @@ const CV = require('./models/CV');
 const Candidacy = require('./models/Candidacy');
 const Notification = require('./models/Notification');
 const Interview = require('./models/Interview');
+const InterviewMetric = require('./models/InterviewMetric');
+const InterviewReport = require('./models/InterviewReport');
+const AppFeedback = require('./models/AppFeedback');
 const Chat = require('./models/Chat');
 const CandidateSession = require('./models/CandidateSession');
 const QuizAttempt = require('./models/QuizAttempt');
@@ -140,6 +143,119 @@ function formatDateTimeFr(date) {
   });
 }
 
+function generateDefaultInterviewMeetingLink({ candidateId, recruiterId, jobOfferId, scheduledAt }) {
+  const timestampPart = formatDateTimeFr(scheduledAt)
+    .replace(/[^0-9]/g, '')
+    .slice(0, 12);
+  const candidatePart = String(candidateId || '').slice(-6) || 'cand';
+  const recruiterPart = String(recruiterId || '').slice(-6) || 'rec';
+  const offerPart = String(jobOfferId || '').slice(-4) || 'offr';
+  const randomPart = crypto.randomBytes(2).toString('hex');
+  const room = `AIR-${recruiterPart}-${candidatePart}-${offerPart}-${timestampPart || Date.now()}-${randomPart}`;
+  return `https://meet.jit.si/${room}`;
+}
+
+function scoreBand(score) {
+  if (!Number.isFinite(score)) return 'inconnu';
+  if (score >= 75) return 'eleve';
+  if (score >= 50) return 'moyen';
+  return 'faible';
+}
+
+function buildInterviewReport(interview, metrics) {
+  const list = Array.isArray(metrics) ? metrics : [];
+  const scores = list
+    .map((m) => Number(m?.concentrationScore))
+    .filter((n) => Number.isFinite(n));
+
+  const sampleCount = scores.length;
+  const averageScore = sampleCount ? Math.round(scores.reduce((a, b) => a + b, 0) / sampleCount) : null;
+  const minScore = sampleCount ? Math.min(...scores) : null;
+  const maxScore = sampleCount ? Math.max(...scores) : null;
+
+  const firstSample = list[0]?.sampledAt ? new Date(list[0].sampledAt) : null;
+  const lastSample = list[list.length - 1]?.sampledAt ? new Date(list[list.length - 1].sampledAt) : null;
+  const durationMinutes = firstSample && lastSample
+    ? Math.max(0, Math.round((lastSample.getTime() - firstSample.getTime()) / 60000))
+    : 0;
+
+  let visibleCount = 0;
+  let focusedCount = 0;
+  let inactiveCount = 0;
+  for (const item of list) {
+    const signals = item?.signals && typeof item.signals === 'object' ? item.signals : {};
+    if (signals.isVisible === true) visibleCount += 1;
+    if (signals.hasFocus === true) focusedCount += 1;
+    if (Number(signals.inactivitySec) > 30) inactiveCount += 1;
+  }
+
+  const visibleRate = sampleCount ? Math.round((visibleCount / sampleCount) * 100) : null;
+  const focusRate = sampleCount ? Math.round((focusedCount / sampleCount) * 100) : null;
+  const inactivityRate = sampleCount ? Math.round((inactiveCount / sampleCount) * 100) : null;
+
+  const lowMoments = scores.filter((s) => s < 50).length;
+  const mediumMoments = scores.filter((s) => s >= 50 && s < 75).length;
+  const highMoments = scores.filter((s) => s >= 75).length;
+
+  const globalBand = scoreBand(averageScore);
+  const recommendations = [];
+  if (!sampleCount) {
+    recommendations.push('Aucune mesure disponible. Verifier que le candidat a rejoint l entretien via AIR Meet.');
+  } else {
+    if ((focusRate || 0) < 70) recommendations.push('Ajouter une phase de questions courtes pour maintenir l attention.');
+    if ((inactivityRate || 0) > 35) recommendations.push('Fractionner l entretien en blocs plus dynamiques avec interactions frequentes.');
+    if ((averageScore || 0) < 60) recommendations.push('Prevoir un second entretien plus court pour confirmer les observations.');
+    if ((averageScore || 0) >= 75) recommendations.push('Concentration stable. Vous pouvez augmenter le niveau des questions de profondeur.');
+  }
+
+  const summaryText = !sampleCount
+    ? 'Entretien termine sans echantillons exploitables de concentration.'
+    : globalBand === 'eleve'
+      ? 'Concentration globalement elevee pendant l entretien.'
+      : globalBand === 'moyen'
+        ? 'Concentration correcte avec des fluctuations notables.'
+        : 'Concentration faible avec plusieurs moments de decrochage.';
+
+  return {
+    summary: {
+      title: 'Bilan complet entretien',
+      interviewId: String(interview?._id || ''),
+      generatedAt: new Date(),
+      overallBand: globalBand,
+      summaryText,
+      mode: interview?.mode || '',
+      scheduledAt: interview?.scheduledAt || null,
+      candidateName: interview?.candidateName || '',
+    },
+    metricsOverview: {
+      sampleCount,
+      averageScore,
+      minScore,
+      maxScore,
+      durationMinutes,
+      scoreDistribution: {
+        highMoments,
+        mediumMoments,
+        lowMoments,
+      },
+    },
+    behaviorAnalysis: {
+      visibilityRate: visibleRate,
+      focusRate,
+      prolongedInactivityRate: inactivityRate,
+      interpretation: {
+        visibility: visibleRate === null ? 'Aucune donnee' : visibleRate >= 85 ? 'Tres bonne presence visuelle' : visibleRate >= 65 ? 'Presence correcte' : 'Presence visuelle instable',
+        focus: focusRate === null ? 'Aucune donnee' : focusRate >= 80 ? 'Attention ecran stable' : focusRate >= 60 ? 'Attention variable' : 'Attention faible',
+      },
+    },
+    recommendations,
+    raw: {
+      firstSampleAt: firstSample || null,
+      lastSampleAt: lastSample || null,
+    },
+  };
+}
+
 async function sendInterviewEmailSafe(candidateEmail, candidateName, recruiterName, recruiterEmail, recruiterCompany, interviewDate, mode, location, meetingLink, offerTitle, notes) {
   const email = normalizeEmail(candidateEmail);
   if (!isValidEmail(email)) {
@@ -246,6 +362,58 @@ function recordHit(map, key, now, windowMs) {
   filtered.push(now);
   map.set(key, filtered);
   return filtered.length;
+}
+
+async function issueSecurityOtpByEmail({ email, purpose, subject, introText }) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!isValidEmail(normalizedEmail)) {
+    return { ok: false, message: 'Email invalide.' };
+  }
+
+  const transporter = getMailerTransporter();
+  if (!transporter) {
+    return { ok: false, message: 'SMTP non configure.' };
+  }
+
+  const code = String(crypto.randomInt(100000, 1000000));
+  const codeHash = sha256Hex(code);
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+  await PasswordResetToken.deleteMany({ email: normalizedEmail, purpose });
+  await PasswordResetToken.create({
+    email: normalizedEmail,
+    purpose,
+    codeHash,
+    expiresAt,
+    attempts: 0,
+    consumedAt: null,
+  });
+
+  const text =
+    `${introText}\n\n` +
+    `Code: ${code}\n` +
+    `Expiration: 10 minutes\n\n` +
+    `Si vous n'etes pas a l'origine de cette demande, ignorez cet email.`;
+
+  const html = `
+    <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+      <h2 style="margin:0 0 12px 0">Code de verification AIR</h2>
+      <p style="margin:0 0 12px 0">${escapeHtml(introText)}</p>
+      <div style="font-size:28px;font-weight:800;letter-spacing:4px;background:#f1f5f9;border-radius:12px;padding:14px 18px;display:inline-block">${code}</div>
+      <p style="margin:16px 0 0 0;color:#475569">Ce code expire dans 10 minutes.</p>
+      <p style="margin:12px 0 0 0;color:#475569">Si vous n'etes pas a l'origine de cette demande, ignorez cet email.</p>
+    </div>
+  `;
+
+  await transporter.sendMail({
+    from: getFromAddress(),
+    to: normalizedEmail,
+    subject,
+    text,
+    html,
+  });
+
+  return { ok: true };
 }
 
 function normalizeTextForMatch(value) {
@@ -764,23 +932,32 @@ app.post('/api/recruiters/register', async (req, res) => {
 app.post('/api/recruiters/login', async (req, res) => {
   try {
     const { email, password } = req.body;
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const rawPassword = String(password || '');
 
-    if (!email || !password) {
+    if (!normalizedEmail || !rawPassword) {
       return res.status(400).json({
         success: false,
         message: 'Email et mot de passe sont requis.',
       });
     }
 
-    const recruiter = await Recruiter.findOne({ email: email.toLowerCase() });
+    const recruiter = await Recruiter.findOne({ email: normalizedEmail });
     if (!recruiter) {
+      const candidateWithSameEmail = await Candidate.findOne({ email: normalizedEmail }).select('_id');
+      if (candidateWithSameEmail) {
+        return res.status(401).json({
+          success: false,
+          message: 'Ce compte existe en tant que candidat. Utilisez la connexion candidat.',
+        });
+      }
       return res.status(401).json({
         success: false,
         message: 'Identifiants invalides.',
       });
     }
 
-    const isPasswordValid = await bcrypt.compare(password, recruiter.passwordHash);
+    const isPasswordValid = await bcrypt.compare(rawPassword, recruiter.passwordHash);
     if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
@@ -925,10 +1102,43 @@ app.put('/api/recruiters/:recruiterId', async (req, res) => {
   }
 });
 
+app.post('/api/recruiters/:recruiterId/password/otp/request', async (req, res) => {
+  try {
+    const { recruiterId } = req.params;
+    if (!recruiterId) {
+      return res.status(400).json({ success: false, message: 'recruiterId est requis.' });
+    }
+
+    const recruiter = await Recruiter.findById(recruiterId).select('email firstName lastName');
+    if (!recruiter) {
+      return res.status(404).json({ success: false, message: 'Recruteur introuvable.' });
+    }
+
+    const result = await issueSecurityOtpByEmail({
+      email: recruiter.email,
+      purpose: 'password_change',
+      subject: 'Code verification changement mot de passe AIR',
+      introText: 'Utilisez ce code pour confirmer le changement de votre mot de passe recruteur.',
+    });
+
+    if (!result.ok) {
+      return res.status(500).json({ success: false, message: result.message || 'Impossible d envoyer le code.' });
+    }
+
+    return res.status(200).json({ success: true, message: 'Code de verification envoye par email.' });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur pendant l envoi du code.',
+      error: error.message,
+    });
+  }
+});
+
 app.put('/api/recruiters/:recruiterId/password', async (req, res) => {
   try {
     const { recruiterId } = req.params;
-    const { currentPassword, newPassword } = req.body || {};
+    const { currentPassword, newPassword, verificationCode } = req.body || {};
 
     if (!recruiterId) {
       return res.status(400).json({
@@ -937,10 +1147,10 @@ app.put('/api/recruiters/:recruiterId/password', async (req, res) => {
       });
     }
 
-    if (!currentPassword || !newPassword) {
+    if (!currentPassword || !newPassword || !verificationCode) {
       return res.status(400).json({
         success: false,
-        message: 'Mot de passe actuel et nouveau mot de passe sont requis.',
+        message: 'Mot de passe actuel, nouveau mot de passe et code de verification sont requis.',
       });
     }
 
@@ -967,8 +1177,31 @@ app.put('/api/recruiters/:recruiterId/password', async (req, res) => {
       });
     }
 
+    const token = await PasswordResetToken.findOne({
+      email: normalizeEmail(recruiter.email),
+      purpose: 'password_change',
+      consumedAt: null,
+    }).sort({ createdAt: -1 });
+
+    if (!token || (token.expiresAt && token.expiresAt.getTime() < Date.now())) {
+      return res.status(400).json({ success: false, message: 'Code invalide ou expire.' });
+    }
+
+    if ((token.attempts || 0) >= 5) {
+      return res.status(429).json({ success: false, message: 'Trop de tentatives. Redemandez un nouveau code.' });
+    }
+
+    const providedHash = sha256Hex(String(verificationCode).trim());
+    if (providedHash !== token.codeHash) {
+      token.attempts = (token.attempts || 0) + 1;
+      await token.save();
+      return res.status(400).json({ success: false, message: 'Code invalide ou expire.' });
+    }
+
     recruiter.passwordHash = await bcrypt.hash(String(newPassword), 10);
     await recruiter.save();
+    token.consumedAt = new Date();
+    await token.save();
 
     return res.status(200).json({
       success: true,
@@ -1091,23 +1324,32 @@ app.post('/api/candidates/register', async (req, res) => {
 app.post('/api/candidates/login', async (req, res) => {
   try {
     const { email, password } = req.body;
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const rawPassword = String(password || '');
 
-    if (!email || !password) {
+    if (!normalizedEmail || !rawPassword) {
       return res.status(400).json({
         success: false,
         message: 'Email et mot de passe sont requis.',
       });
     }
 
-    const candidate = await Candidate.findOne({ email: email.toLowerCase() });
+    const candidate = await Candidate.findOne({ email: normalizedEmail });
     if (!candidate) {
+      const recruiterWithSameEmail = await Recruiter.findOne({ email: normalizedEmail }).select('_id');
+      if (recruiterWithSameEmail) {
+        return res.status(401).json({
+          success: false,
+          message: 'Ce compte existe en tant que recruteur. Utilisez la connexion recruteur.',
+        });
+      }
       return res.status(401).json({
         success: false,
         message: 'Identifiants invalides.',
       });
     }
 
-    const isPasswordValid = await bcrypt.compare(password, candidate.passwordHash);
+    const isPasswordValid = await bcrypt.compare(rawPassword, candidate.passwordHash);
     if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
@@ -1214,8 +1456,8 @@ app.post('/api/auth/password-reset/request', async (req, res) => {
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
     // Invalidate previous tokens for this email.
-    await PasswordResetToken.deleteMany({ email });
-    await PasswordResetToken.create({ email, codeHash, expiresAt, attempts: 0, consumedAt: null });
+    await PasswordResetToken.deleteMany({ email, purpose: 'password_reset' });
+    await PasswordResetToken.create({ email, purpose: 'password_reset', codeHash, expiresAt, attempts: 0, consumedAt: null });
 
     const from = getFromAddress();
     const subject = 'Votre code de verification AIR';
@@ -1262,6 +1504,51 @@ app.post('/api/auth/password-reset/request', async (req, res) => {
   }
 });
 
+app.post('/api/auth/password-reset/verify', async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    const code = String(req.body?.code || '').trim();
+
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ success: false, message: 'Email invalide.' });
+    }
+    if (!code) {
+      return res.status(400).json({ success: false, message: 'Code requis.' });
+    }
+
+    const token = await PasswordResetToken.findOne({ email, purpose: 'password_reset', consumedAt: null }).sort({ createdAt: -1 });
+    if (!token) {
+      return res.status(400).json({ success: false, message: 'Code invalide ou expire.' });
+    }
+
+    if (token.expiresAt && token.expiresAt.getTime() < Date.now()) {
+      return res.status(400).json({ success: false, message: 'Code invalide ou expire.' });
+    }
+
+    if ((token.attempts || 0) >= 5) {
+      return res.status(429).json({ success: false, message: 'Trop de tentatives. Redemandez un nouveau code.' });
+    }
+
+    const providedHash = sha256Hex(code);
+    if (providedHash !== token.codeHash) {
+      token.attempts = (token.attempts || 0) + 1;
+      await token.save();
+      return res.status(400).json({ success: false, message: 'Code invalide ou expire.' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Code verifie. Vous pouvez definir un nouveau mot de passe.',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur pendant la verification du code.',
+      error: error.message,
+    });
+  }
+});
+
 app.post('/api/auth/password-reset/confirm', async (req, res) => {
   try {
     const email = normalizeEmail(req.body?.email);
@@ -1278,7 +1565,7 @@ app.post('/api/auth/password-reset/confirm', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Le mot de passe doit contenir au moins 8 caracteres.' });
     }
 
-    const token = await PasswordResetToken.findOne({ email, consumedAt: null }).sort({ createdAt: -1 });
+    const token = await PasswordResetToken.findOne({ email, purpose: 'password_reset', consumedAt: null }).sort({ createdAt: -1 });
     if (!token) {
       return res.status(400).json({ success: false, message: 'Code invalide ou expire.' });
     }
@@ -1652,19 +1939,52 @@ app.put('/api/candidates/:candidateId', async (req, res) => {
   }
 });
 
+app.post('/api/candidates/:candidateId/password/otp/request', async (req, res) => {
+  try {
+    const { candidateId } = req.params;
+    if (!candidateId) {
+      return res.status(400).json({ success: false, message: 'candidateId est requis.' });
+    }
+
+    const candidate = await Candidate.findById(candidateId).select('email firstName lastName');
+    if (!candidate) {
+      return res.status(404).json({ success: false, message: 'Candidat introuvable.' });
+    }
+
+    const result = await issueSecurityOtpByEmail({
+      email: candidate.email,
+      purpose: 'password_change',
+      subject: 'Code verification changement mot de passe AIR',
+      introText: 'Utilisez ce code pour confirmer le changement de votre mot de passe candidat.',
+    });
+
+    if (!result.ok) {
+      return res.status(500).json({ success: false, message: result.message || 'Impossible d envoyer le code.' });
+    }
+
+    return res.status(200).json({ success: true, message: 'Code de verification envoye par email.' });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur pendant l envoi du code.',
+      error: error.message,
+    });
+  }
+});
+
 app.put('/api/candidates/:candidateId/password', async (req, res) => {
   try {
     const { candidateId } = req.params;
-    const { currentPassword, newPassword } = req.body || {};
+    const { currentPassword, newPassword, verificationCode } = req.body || {};
 
     if (!candidateId) {
       return res.status(400).json({ success: false, message: 'candidateId est requis.' });
     }
 
-    if (!currentPassword || !newPassword) {
+    if (!currentPassword || !newPassword || !verificationCode) {
       return res.status(400).json({
         success: false,
-        message: 'Mot de passe actuel et nouveau mot de passe sont requis.',
+        message: 'Mot de passe actuel, nouveau mot de passe et code de verification sont requis.',
       });
     }
 
@@ -1685,8 +2005,31 @@ app.put('/api/candidates/:candidateId/password', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Mot de passe actuel incorrect.' });
     }
 
+    const token = await PasswordResetToken.findOne({
+      email: normalizeEmail(candidate.email),
+      purpose: 'password_change',
+      consumedAt: null,
+    }).sort({ createdAt: -1 });
+
+    if (!token || (token.expiresAt && token.expiresAt.getTime() < Date.now())) {
+      return res.status(400).json({ success: false, message: 'Code invalide ou expire.' });
+    }
+
+    if ((token.attempts || 0) >= 5) {
+      return res.status(429).json({ success: false, message: 'Trop de tentatives. Redemandez un nouveau code.' });
+    }
+
+    const providedHash = sha256Hex(String(verificationCode).trim());
+    if (providedHash !== token.codeHash) {
+      token.attempts = (token.attempts || 0) + 1;
+      await token.save();
+      return res.status(400).json({ success: false, message: 'Code invalide ou expire.' });
+    }
+
     candidate.passwordHash = await bcrypt.hash(String(newPassword), 10);
     await candidate.save();
+    token.consumedAt = new Date();
+    await token.save();
 
     return res.status(200).json({ success: true, message: 'Mot de passe mis a jour avec succes.' });
   } catch (error) {
@@ -3648,6 +3991,11 @@ app.post('/api/interviews', async (req, res) => {
     const isOnsite = normalizedMode === 'Présentiel';
     const safeMeetingLink = String(meetingLink || '').trim();
     const safeLocation = String(location || '').trim();
+    const effectiveMeetingLink = !isOnsite && safeMeetingLink
+      ? safeMeetingLink
+      : !isOnsite
+        ? generateDefaultInterviewMeetingLink({ candidateId, recruiterId, jobOfferId, scheduledAt: parsed })
+        : '';
 
     if (!isOnsite && normalizedMode !== 'Visio') {
       return res.status(400).json({
@@ -3676,7 +4024,7 @@ app.post('/api/interviews', async (req, res) => {
       candidateEmail: String(candidateEmail || '').trim(),
       scheduledAt: parsed,
       mode: normalizedMode,
-      meetingLink: safeMeetingLink,
+      meetingLink: effectiveMeetingLink,
       location: safeLocation,
       notes: String(notes || '').trim(),
       status: 'Planifie',
@@ -3698,7 +4046,7 @@ app.post('/api/interviews', async (req, res) => {
 
     const title = offerTitle ? `Entretien planifié — ${offerTitle}` : 'Entretien planifié';
     const modeLabel = isOnsite ? 'Présentiel' : 'En ligne';
-    const whereLabel = isOnsite ? `Lieu: ${safeLocation}` : safeMeetingLink ? `Lien: ${safeMeetingLink}` : '';
+    const whereLabel = isOnsite ? `Lieu: ${safeLocation}` : effectiveMeetingLink ? `Lien: ${effectiveMeetingLink}` : '';
     const message = `Un recruteur${recruiterName ? ` (${recruiterName})` : ''} a planifié un entretien le ${whenLabel} (${modeLabel}).${whereLabel ? ` ${whereLabel}` : ''}`;
 
     const notification = new Notification({
@@ -3711,7 +4059,7 @@ app.post('/api/interviews', async (req, res) => {
       message,
       meetingAt: parsed,
       mode: normalizedMode,
-      meetingLink: safeMeetingLink,
+      meetingLink: effectiveMeetingLink,
       location: safeLocation,
     });
     await notification.save();
@@ -3734,7 +4082,7 @@ app.post('/api/interviews', async (req, res) => {
         parsed,
         normalizedMode,
         safeLocation,
-        safeMeetingLink,
+        effectiveMeetingLink,
         offerTitle,
         notes
       ).catch((err) => {
@@ -3801,6 +4149,308 @@ app.get('/api/interviews/recruiter/:recruiterId', async (req, res) => {
       message: 'Erreur serveur pendant la recuperation des entretiens recruteur.',
       error: error.message,
     });
+  }
+});
+
+app.post('/api/interviews/:interviewId/metrics', async (req, res) => {
+  try {
+    const { interviewId } = req.params;
+    if (!interviewId || !mongoose.Types.ObjectId.isValid(interviewId)) {
+      return res.status(400).json({ success: false, message: 'interviewId invalide.' });
+    }
+
+    const { concentrationScore, role, sampledAt, signals } = req.body || {};
+    const numericScore = Number(concentrationScore);
+    if (!Number.isFinite(numericScore)) {
+      return res.status(400).json({ success: false, message: 'concentrationScore est requis.' });
+    }
+
+    const metric = await InterviewMetric.create({
+      interviewId,
+      role: role === 'recruiter' ? 'recruiter' : role === 'system' ? 'system' : 'candidate',
+      concentrationScore: Math.max(0, Math.min(100, Math.round(numericScore))),
+      sampledAt: sampledAt ? new Date(sampledAt) : new Date(),
+      signals: signals && typeof signals === 'object' ? signals : {},
+    });
+
+    return res.status(201).json({ success: true, metric });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur metrics.', error: error.message });
+  }
+});
+
+app.get('/api/interviews/:interviewId/metrics/summary', async (req, res) => {
+  try {
+    const { interviewId } = req.params;
+    if (!interviewId || !mongoose.Types.ObjectId.isValid(interviewId)) {
+      return res.status(400).json({ success: false, message: 'interviewId invalide.' });
+    }
+
+    const minutes = Math.min(Math.max(Number(req.query.minutes) || 15, 1), 180);
+    const since = new Date(Date.now() - minutes * 60 * 1000);
+    const role = req.query.role === 'recruiter' ? 'recruiter' : 'candidate';
+
+    const [stats] = await InterviewMetric.aggregate([
+      {
+        $match: {
+          interviewId: new mongoose.Types.ObjectId(interviewId),
+          role,
+          sampledAt: { $gte: since },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          avgScore: { $avg: '$concentrationScore' },
+          minScore: { $min: '$concentrationScore' },
+          maxScore: { $max: '$concentrationScore' },
+          sampleCount: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const latest = await InterviewMetric.findOne({ interviewId, role }).sort({ sampledAt: -1 }).lean();
+    const averageScore = stats?.avgScore ? Math.round(stats.avgScore) : null;
+    const status = averageScore === null
+      ? 'Aucune donnée'
+      : averageScore >= 75
+        ? 'Bonne concentration'
+        : averageScore >= 50
+          ? 'Concentration moyenne'
+          : 'Concentration faible';
+
+    return res.status(200).json({
+      success: true,
+      summary: {
+        role,
+        minutes,
+        sampleCount: stats?.sampleCount || 0,
+        averageScore,
+        minScore: Number.isFinite(stats?.minScore) ? Math.round(stats.minScore) : null,
+        maxScore: Number.isFinite(stats?.maxScore) ? Math.round(stats.maxScore) : null,
+        latestScore: Number.isFinite(latest?.concentrationScore) ? Math.round(latest.concentrationScore) : null,
+        latestAt: latest?.sampledAt || null,
+        status,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur summary metrics.', error: error.message });
+  }
+});
+
+app.post('/api/interviews/:interviewId/report/generate', async (req, res) => {
+  try {
+    const { interviewId } = req.params;
+    if (!interviewId || !mongoose.Types.ObjectId.isValid(interviewId)) {
+      return res.status(400).json({ success: false, message: 'interviewId invalide.' });
+    }
+
+    const interview = await Interview.findById(interviewId).lean();
+    if (!interview) {
+      return res.status(404).json({ success: false, message: 'Entretien introuvable.' });
+    }
+
+    const metrics = await InterviewMetric.find({ interviewId, role: 'candidate' })
+      .sort({ sampledAt: 1 })
+      .lean();
+
+    const reportPayload = buildInterviewReport(interview, metrics);
+
+    const report = await InterviewReport.findOneAndUpdate(
+      { interviewId },
+      {
+        $set: {
+          candidateId: interview.candidateId || undefined,
+          recruiterId: interview.recruiterId || undefined,
+          generatedAt: new Date(),
+          ...reportPayload,
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    await Interview.findByIdAndUpdate(interviewId, { $set: { status: 'Termine' } }).catch(() => null);
+
+    return res.status(200).json({ success: true, report });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur generation bilan.', error: error.message });
+  }
+});
+
+app.get('/api/interviews/:interviewId/report', async (req, res) => {
+  try {
+    const { interviewId } = req.params;
+    if (!interviewId || !mongoose.Types.ObjectId.isValid(interviewId)) {
+      return res.status(400).json({ success: false, message: 'interviewId invalide.' });
+    }
+
+    const report = await InterviewReport.findOne({ interviewId }).lean();
+    if (!report) {
+      return res.status(404).json({ success: false, message: 'Bilan introuvable pour cet entretien.' });
+    }
+
+    return res.status(200).json({ success: true, report });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur lecture bilan.', error: error.message });
+  }
+});
+
+// Application feedback routes
+app.post('/api/app-feedback', async (req, res) => {
+  try {
+    const userId = String(req.body?.userId || '').trim();
+    const userRoleRaw = String(req.body?.userRole || '').trim().toLowerCase();
+    const userRole = userRoleRaw === 'recruiter' ? 'recruiter' : userRoleRaw === 'candidate' ? 'candidate' : '';
+    const rating = Number(req.body?.rating);
+    const comment = String(req.body?.comment || '').trim();
+
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ success: false, message: 'userId invalide.' });
+    }
+    if (!userRole) {
+      return res.status(400).json({ success: false, message: 'userRole doit etre candidate ou recruiter.' });
+    }
+    if (!Number.isFinite(rating) || rating < 1 || rating > 5) {
+      return res.status(400).json({ success: false, message: 'rating doit etre entre 1 et 5.' });
+    }
+
+    const feedback = await AppFeedback.findOneAndUpdate(
+      { userId, userRole },
+      {
+        $set: {
+          rating: Math.round(rating),
+          comment: comment.slice(0, 1000),
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).lean();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Merci pour votre feedback sur AIR.',
+      feedback,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur enregistrement feedback.', error: error.message });
+  }
+});
+
+app.get('/api/app-feedback/mine', async (req, res) => {
+  try {
+    const userId = String(req.query.userId || '').trim();
+    const userRoleRaw = String(req.query.userRole || '').trim().toLowerCase();
+    const userRole = userRoleRaw === 'recruiter' ? 'recruiter' : userRoleRaw === 'candidate' ? 'candidate' : '';
+
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ success: false, message: 'userId invalide.' });
+    }
+    if (!userRole) {
+      return res.status(400).json({ success: false, message: 'userRole doit etre candidate ou recruiter.' });
+    }
+
+    const feedback = await AppFeedback.findOne({ userId, userRole }).lean();
+    return res.status(200).json({ success: true, feedback: feedback || null });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur lecture feedback.', error: error.message });
+  }
+});
+
+app.get('/api/app-feedback/summary', async (_req, res) => {
+  try {
+    const [stats] = await AppFeedback.aggregate([
+      {
+        $group: {
+          _id: null,
+          averageRating: { $avg: '$rating' },
+          totalFeedbacks: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const byRoleAgg = await AppFeedback.aggregate([
+      {
+        $group: {
+          _id: '$userRole',
+          averageRating: { $avg: '$rating' },
+          totalFeedbacks: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const candidateStatsRaw = byRoleAgg.find((x) => x?._id === 'candidate') || null;
+    const recruiterStatsRaw = byRoleAgg.find((x) => x?._id === 'recruiter') || null;
+
+    const [candidateCommentsRaw, recruiterCommentsRaw] = await Promise.all([
+      AppFeedback.find({ userRole: 'candidate', comment: { $ne: '' } })
+        .sort({ updatedAt: -1 })
+        .limit(4)
+        .select('userId rating comment updatedAt')
+        .lean(),
+      AppFeedback.find({ userRole: 'recruiter', comment: { $ne: '' } })
+        .sort({ updatedAt: -1 })
+        .limit(4)
+        .select('userId rating comment updatedAt')
+        .lean(),
+    ]);
+
+    const candidateIds = [...new Set(candidateCommentsRaw.map((item) => String(item?.userId || '')).filter(Boolean))];
+    const recruiterIds = [...new Set(recruiterCommentsRaw.map((item) => String(item?.userId || '')).filter(Boolean))];
+
+    const [candidateUsers, recruiterUsers] = await Promise.all([
+      candidateIds.length > 0
+        ? Candidate.find({ _id: { $in: candidateIds } }).select('firstName lastName').lean()
+        : Promise.resolve([]),
+      recruiterIds.length > 0
+        ? Recruiter.find({ _id: { $in: recruiterIds } }).select('firstName lastName').lean()
+        : Promise.resolve([]),
+    ]);
+
+    const candidateNameById = new Map(
+      candidateUsers.map((user) => [
+        String(user?._id || ''),
+        `${String(user?.firstName || '').trim()} ${String(user?.lastName || '').trim()}`.trim() || 'Utilisateur',
+      ])
+    );
+    const recruiterNameById = new Map(
+      recruiterUsers.map((user) => [
+        String(user?._id || ''),
+        `${String(user?.firstName || '').trim()} ${String(user?.lastName || '').trim()}`.trim() || 'Utilisateur',
+      ])
+    );
+
+    return res.status(200).json({
+      success: true,
+      summary: {
+        averageRating: Number.isFinite(stats?.averageRating) ? Number(stats.averageRating.toFixed(2)) : null,
+        totalFeedbacks: Number(stats?.totalFeedbacks || 0),
+        byRole: {
+          candidate: {
+            averageRating: Number.isFinite(candidateStatsRaw?.averageRating) ? Number(candidateStatsRaw.averageRating.toFixed(2)) : null,
+            totalFeedbacks: Number(candidateStatsRaw?.totalFeedbacks || 0),
+          },
+          recruiter: {
+            averageRating: Number.isFinite(recruiterStatsRaw?.averageRating) ? Number(recruiterStatsRaw.averageRating.toFixed(2)) : null,
+            totalFeedbacks: Number(recruiterStatsRaw?.totalFeedbacks || 0),
+          },
+        },
+        latestComments: {
+          candidate: candidateCommentsRaw.map((item) => ({
+            userName: candidateNameById.get(String(item?.userId || '')) || 'Utilisateur',
+            rating: Number(item?.rating || 0),
+            comment: String(item?.comment || ''),
+            updatedAt: item?.updatedAt || null,
+          })),
+          recruiter: recruiterCommentsRaw.map((item) => ({
+            userName: recruiterNameById.get(String(item?.userId || '')) || 'Utilisateur',
+            rating: Number(item?.rating || 0),
+            comment: String(item?.comment || ''),
+            updatedAt: item?.updatedAt || null,
+          })),
+        },
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur summary feedback.', error: error.message });
   }
 });
 

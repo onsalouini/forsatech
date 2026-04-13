@@ -146,10 +146,18 @@ function DashboardRec() {
 		currentPassword: '',
 		newPassword: '',
 		confirmPassword: '',
+		verificationCode: '',
 	})
 	const [passwordMessage, setPasswordMessage] = useState('')
 	const [passwordError, setPasswordError] = useState('')
 	const [savingPassword, setSavingPassword] = useState(false)
+	const [sendingPasswordCode, setSendingPasswordCode] = useState(false)
+	const [appFeedbackForm, setAppFeedbackForm] = useState({ rating: 0, comment: '' })
+	const [appFeedbackSaving, setAppFeedbackSaving] = useState(false)
+	const [appFeedbackMessage, setAppFeedbackMessage] = useState('')
+	const [appFeedbackError, setAppFeedbackError] = useState('')
+	const [appFeedbackSummary, setAppFeedbackSummary] = useState({ averageRating: null, totalFeedbacks: 0 })
+	const [appFeedbackOpen, setAppFeedbackOpen] = useState(false)
 	const [candidacies, setCandidacies] = useState([])
 	const [cvByCandidate, setCvByCandidate] = useState({})
 	const [cvDetailsOpenByCandidate, setCvDetailsOpenByCandidate] = useState({})
@@ -190,6 +198,48 @@ function DashboardRec() {
 		}, 1000)
 		return () => clearInterval(interval)
 	}, [])
+
+	useEffect(() => {
+		const recruiterId = recruiter?.id || recruiter?._id
+		if (!recruiterId) return
+
+		let cancelled = false
+		const fetchAppFeedback = async () => {
+			try {
+				const [mineRes, summaryRes] = await Promise.all([
+					fetch(`${API_BASE}/app-feedback/mine?userId=${encodeURIComponent(recruiterId)}&userRole=recruiter`),
+					fetch(`${API_BASE}/app-feedback/summary`),
+				])
+
+				const mineData = await mineRes.json().catch(() => ({}))
+				const summaryData = await summaryRes.json().catch(() => ({}))
+				if (cancelled) return
+
+				if (mineRes.ok && mineData?.success && mineData?.feedback) {
+					setAppFeedbackForm({
+						rating: Number(mineData.feedback.rating || 0),
+						comment: String(mineData.feedback.comment || ''),
+					})
+				}
+
+				if (summaryRes.ok && summaryData?.success && summaryData?.summary) {
+					setAppFeedbackSummary({
+						averageRating: Number.isFinite(summaryData.summary.averageRating) ? Number(summaryData.summary.averageRating) : null,
+						totalFeedbacks: Number(summaryData.summary.totalFeedbacks || 0),
+					})
+				}
+			} catch {
+				if (!cancelled) {
+					setAppFeedbackSummary((prev) => ({ ...prev }))
+				}
+			}
+		}
+
+		fetchAppFeedback()
+		return () => {
+			cancelled = true
+		}
+	}, [recruiter?.id, recruiter?._id])
 
 	const formattedTime = currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
@@ -1014,9 +1064,17 @@ function DashboardRec() {
 				notes: savedInterview?.notes || interviewForm.notes.trim(),
 				status: savedInterview?.status || 'Planifie',
 			}
+			const autoLinkGenerated =
+				(interviewForm.mode === 'Visio') &&
+				!interviewForm.meetingLink.trim() &&
+				Boolean(savedInterview?.meetingLink)
 
 			setInterviews((prev) => [nextInterview, ...prev])
-			setInterviewMessage('Entretien planifie avec succes. Le candidat a été notifié.')
+			setInterviewMessage(
+				autoLinkGenerated
+					? 'Entretien planifie avec succes. Lien visio genere automatiquement et candidat notifie.'
+					: 'Entretien planifie avec succes. Le candidat a ete notifie.'
+			)
 			resetInterviewForm()
 		} catch (error) {
 			setInterviewError('Serveur indisponible. Verifiez que le backend tourne.')
@@ -1027,6 +1085,13 @@ function DashboardRec() {
 		setInterviewError('')
 		setInterviewMessage('')
 		setInterviews((prev) => prev.filter((it) => it.id !== interviewId))
+	}
+
+	const handleJoinInterview = (meetingLink, interviewId) => {
+		if (!meetingLink) return
+		const displayName = `${recruiter?.firstName || ''} ${recruiter?.lastName || ''}`.trim() || recruiter?.company || 'Recruteur AIR'
+		const interviewQuery = interviewId ? `&interviewId=${encodeURIComponent(interviewId)}` : ''
+		navigate(`/meet?url=${encodeURIComponent(meetingLink)}&name=${encodeURIComponent(displayName)}&role=recruteur${interviewQuery}`)
 	}
 
 	const updateSettingsField = (field, value) => {
@@ -1087,8 +1152,8 @@ function DashboardRec() {
 		setPasswordError('')
 		setPasswordMessage('')
 
-		if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
-			setPasswordError('Tous les champs mot de passe sont requis.')
+		if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword || !passwordForm.verificationCode) {
+			setPasswordError('Tous les champs, y compris le code de verification, sont requis.')
 			return
 		}
 
@@ -1116,6 +1181,7 @@ function DashboardRec() {
 				body: JSON.stringify({
 					currentPassword: passwordForm.currentPassword,
 					newPassword: passwordForm.newPassword,
+					verificationCode: passwordForm.verificationCode,
 				}),
 			})
 
@@ -1126,11 +1192,89 @@ function DashboardRec() {
 			}
 
 			setPasswordMessage(data?.message || 'Mot de passe mis a jour avec succes.')
-			setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
+			setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '', verificationCode: '' })
 		} catch {
 			setPasswordError('Serveur indisponible. Verifiez que le backend tourne.')
 		} finally {
 			setSavingPassword(false)
+		}
+	}
+
+	const handleRequestPasswordCode = async () => {
+		setPasswordError('')
+		setPasswordMessage('')
+		const recruiterId = recruiter?.id || recruiter?._id
+		if (!recruiterId) {
+			setPasswordError('Session recruteur invalide. Reconnectez-vous.')
+			return
+		}
+
+		setSendingPasswordCode(true)
+		try {
+			const response = await fetch(`${API_BASE}/recruiters/${recruiterId}/password/otp/request`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+			})
+			const data = await response.json().catch(() => ({}))
+			if (!response.ok || !data?.success) {
+				setPasswordError(data?.message || 'Impossible d envoyer le code de verification.')
+				return
+			}
+			setPasswordMessage(data?.message || 'Code de verification envoye par email.')
+		} catch {
+			setPasswordError('Serveur indisponible. Verifiez que le backend tourne.')
+		} finally {
+			setSendingPasswordCode(false)
+		}
+	}
+
+	const handleSubmitAppFeedback = async (e) => {
+		e.preventDefault()
+		setAppFeedbackError('')
+		setAppFeedbackMessage('')
+
+		const recruiterId = recruiter?.id || recruiter?._id
+		if (!recruiterId) {
+			setAppFeedbackError('Session recruteur invalide. Reconnectez-vous.')
+			return
+		}
+		if (!Number.isFinite(appFeedbackForm.rating) || appFeedbackForm.rating < 1 || appFeedbackForm.rating > 5) {
+			setAppFeedbackError('Veuillez choisir une note entre 1 et 5 etoiles.')
+			return
+		}
+
+		setAppFeedbackSaving(true)
+		try {
+			const response = await fetch(`${API_BASE}/app-feedback`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					userId: recruiterId,
+					userRole: 'recruiter',
+					rating: appFeedbackForm.rating,
+					comment: appFeedbackForm.comment,
+				}),
+			})
+
+			const data = await response.json().catch(() => ({}))
+			if (!response.ok || !data?.success) {
+				setAppFeedbackError(data?.message || 'Impossible d enregistrer votre feedback.')
+				return
+			}
+
+			setAppFeedbackMessage(data?.message || 'Merci pour votre feedback.')
+			const summaryRes = await fetch(`${API_BASE}/app-feedback/summary`)
+			const summaryData = await summaryRes.json().catch(() => ({}))
+			if (summaryRes.ok && summaryData?.success && summaryData?.summary) {
+				setAppFeedbackSummary({
+					averageRating: Number.isFinite(summaryData.summary.averageRating) ? Number(summaryData.summary.averageRating) : null,
+					totalFeedbacks: Number(summaryData.summary.totalFeedbacks || 0),
+				})
+			}
+		} catch {
+			setAppFeedbackError('Serveur indisponible. Verifiez que le backend tourne.')
+		} finally {
+			setAppFeedbackSaving(false)
 		}
 	}
 
@@ -2184,7 +2328,7 @@ function DashboardRec() {
 												<label className='mb-1 block text-xs font-bold uppercase tracking-wide text-[#4f7191]'>Lien reunion {interviewForm.mode === 'Visio' ? '(recommande)' : '(optionnel)'}</label>
 												<input
 													className='w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-cyan-500'
-													placeholder='https://meet...'
+													placeholder={interviewForm.mode === 'Visio' ? 'Laisser vide pour generation auto (Jitsi)' : 'https://meet...'}
 													value={interviewForm.meetingLink}
 													onChange={(e) => updateInterviewField('meetingLink', e.target.value)}
 												/>
@@ -2295,14 +2439,13 @@ function DashboardRec() {
 																	<div className='rounded-lg border border-[#d8ebf8] bg-white px-3 py-2'>
 																		<p className='text-[10px] font-black uppercase tracking-[0.08em] text-[#5b7f9d]'>{it.mode === 'Visio' ? 'Lien visio' : 'Lieu'}</p>
 																		{it.mode === 'Visio' && it.meetingLink ? (
-																			<a
-																				href={it.meetingLink}
-																				target='_blank'
-																				rel='noreferrer'
+																			<button
+																				type='button'
+																				onClick={() => handleJoinInterview(it.meetingLink, it.id)}
 																				className='mt-1 inline-flex max-w-full items-center rounded-md bg-cyan-50 px-2 py-1 text-xs font-semibold text-[#0a5f88] hover:bg-cyan-100'
 																			>
-																				Ouvrir le lien
-																			</a>
+																				Rejoindre dans AIR
+																			</button>
 																		) : (
 																			<p className='mt-1 text-xs text-[#355978]'>{it.location || 'Non defini'}</p>
 																		)}
@@ -2502,6 +2645,23 @@ function DashboardRec() {
 											value={passwordForm.confirmPassword}
 											onChange={(e) => updatePasswordField('confirmPassword', e.target.value)}
 										/>
+										<div className='grid gap-2 sm:grid-cols-[1fr_auto]'>
+											<input
+												type='text'
+												className='w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-cyan-500'
+												placeholder='Code de verification recu par email'
+												value={passwordForm.verificationCode}
+												onChange={(e) => updatePasswordField('verificationCode', e.target.value)}
+											/>
+											<button
+												type='button'
+												onClick={handleRequestPasswordCode}
+												disabled={sendingPasswordCode}
+												className='rounded-xl border border-cyan-300 bg-cyan-50 px-3 py-2.5 text-xs font-semibold text-cyan-800 hover:bg-cyan-100 disabled:opacity-60'
+											>
+												{sendingPasswordCode ? 'Envoi...' : 'Envoyer code'}
+											</button>
+										</div>
 
 										<div className='pt-1'>
 											<button type='submit' disabled={savingPassword} className='rounded-xl bg-gradient-to-r from-[#0ea5e9] to-[#1d4ed8] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60'>
@@ -2510,6 +2670,7 @@ function DashboardRec() {
 										</div>
 									</form>
 								</div>
+
 							</div>
 						) : (
 							<div className='mt-8 rounded-2xl border border-[#d7e9f8] bg-[#fbfdff] p-5'>
@@ -2611,6 +2772,56 @@ function DashboardRec() {
 							</div>
 						</div>
 					) : null}
+					<div className='fixed bottom-4 left-4 z-40'>
+						<button
+							type='button'
+							onClick={() => setAppFeedbackOpen((prev) => !prev)}
+							aria-label='Ouvrir le feedback AIR'
+							title='Feedback AIR'
+							className='flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-r from-[#0ea5e9] to-[#1d4ed8] text-lg font-black text-white shadow-xl transition hover:brightness-110'
+						>
+							★
+						</button>
+						{appFeedbackOpen ? (
+							<div className='absolute bottom-14 left-0 w-[86vw] max-w-xs rounded-2xl border border-cyan-100 bg-white p-4 shadow-2xl'>
+								<div className='flex items-start justify-between gap-2'>
+									<div>
+										<p className='text-sm font-black text-[#0d355b]'>Votre avis sur AIR</p>
+										<p className='mt-1 text-xs text-[#4f7191]'>Moyenne globale: {appFeedbackSummary.averageRating ? `${appFeedbackSummary.averageRating}/5` : '—'} • {appFeedbackSummary.totalFeedbacks} avis</p>
+									</div>
+									<button type='button' onClick={() => setAppFeedbackOpen(false)} className='rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50'>Fermer</button>
+								</div>
+
+								{appFeedbackError ? <div className='mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700'>{appFeedbackError}</div> : null}
+								{appFeedbackMessage ? <div className='mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700'>{appFeedbackMessage}</div> : null}
+
+								<form className='mt-3 space-y-3' onSubmit={handleSubmitAppFeedback}>
+									<div className='flex items-center gap-2'>
+										{[1, 2, 3, 4, 5].map((star) => (
+											<button
+												key={star}
+												type='button'
+												onClick={() => setAppFeedbackForm((prev) => ({ ...prev, rating: star }))}
+												className={`h-9 w-9 rounded-full border text-base transition ${star <= appFeedbackForm.rating ? 'border-amber-300 bg-amber-100 text-amber-600' : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300'}`}
+											>
+												★
+											</button>
+										))}
+									</div>
+									<textarea
+										rows={3}
+										value={appFeedbackForm.comment}
+										onChange={(e) => setAppFeedbackForm((prev) => ({ ...prev, comment: e.target.value }))}
+										placeholder='Votre commentaire (optionnel)'
+										className='w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-cyan-500'
+									/>
+									<button type='submit' disabled={appFeedbackSaving} className='w-full rounded-xl bg-gradient-to-r from-[#0ea5e9] to-[#1d4ed8] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60'>
+										{appFeedbackSaving ? 'Envoi...' : 'Envoyer'}
+									</button>
+								</form>
+							</div>
+						) : null}
+					</div>
 				</main>
 			</div>
 		</section>

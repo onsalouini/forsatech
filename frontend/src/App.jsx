@@ -12,6 +12,7 @@ import CandidateCVBuilder from './pages/CandidateCVBuilder.jsx'
 import CandidateCVBuildStep1 from './pages/CandidateCVBuildStep1.jsx'
 import CandidateCVBuildReview from './pages/CandidateCVBuildReview.jsx'
 import DashboardCand from './pages/DashboardCand.jsx'
+import InterviewMeet from './pages/InterviewMeet.jsx'
 import ChooseRole from './pages/ChooseRole.jsx'
 import MotDePasseOublie from './pages/MotDePasseOublie.jsx'
 import './index.css';
@@ -24,7 +25,8 @@ function App() {
   const isDashboardPage =
     location.pathname.startsWith('/dashboard-rec') ||
     location.pathname.startsWith('/EspaceRecruteur') ||
-    location.pathname.startsWith('/EspaceCandidat')
+    location.pathname.startsWith('/EspaceCandidat') ||
+    location.pathname.startsWith('/meet')
 
   const isAuthPage =
     location.pathname === '/connecter' ||
@@ -60,6 +62,7 @@ function App() {
       <Route path='/EspaceCandidat/construire/etape-1' element={<CandidateCVBuildStep1/>}/>
       <Route path='/EspaceCandidat/construire/etape-2' element={<CandidateCVBuilder/>}/>
       <Route path='/EspaceCandidat/construire/finaliser' element={<CandidateCVBuildReview/>}/>
+      <Route path='/meet' element={<InterviewMeet/>}/>
       
     </Routes>
     </main>
