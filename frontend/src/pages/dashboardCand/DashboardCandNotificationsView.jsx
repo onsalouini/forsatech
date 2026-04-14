@@ -9,6 +9,7 @@ export function DashboardCandNotificationsView({
 	notificationsLoading,
 	notifications,
 	markNotificationAsRead,
+	handleJoinInterviewMeet,
 }) {
 	return (
 		<div className='mt-8 rounded-2xl border border-[#9fc3e1] bg-gradient-to-br from-[#f7fbff] via-[#edf6ff] to-[#deedfb] p-5 ring-1 ring-[#bdd8ef] shadow-[0_14px_34px_rgba(8,51,93,0.13)]'>
@@ -47,6 +48,7 @@ export function DashboardCandNotificationsView({
 						const meetingAt = meetingAtRaw ? new Date(meetingAtRaw) : null
 						const mode = n?.interviewId?.mode || n?.mode || ''
 						const meetingLink = n?.interviewId?.meetingLink || n?.meetingLink || ''
+						const interviewId = n?.interviewId?._id || n?.interviewId?.id || ''
 						const location = n?.interviewId?.location || n?.location || ''
 						const notes = n?.interviewId?.notes || ''
 						const isUnread = !n?.readAt
@@ -70,9 +72,13 @@ export function DashboardCandNotificationsView({
 											</div>
 										) : null}
 										{mode !== 'Présentiel' && meetingLink ? (
-											<a href={meetingLink} target='_blank' rel='noreferrer' className='mt-3 inline-block text-xs font-bold text-cyan-700 hover:underline'>
-												Ouvrir le lien de réunion
-											</a>
+											<button
+												type='button'
+												onClick={() => handleJoinInterviewMeet?.(meetingLink, interviewId)}
+												className='mt-3 inline-block text-xs font-bold text-cyan-700 hover:underline'
+											>
+												Rejoindre l entretien dans AIR Meet
+											</button>
 										) : null}
 										{notes ? (
 											<div className='mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700'>

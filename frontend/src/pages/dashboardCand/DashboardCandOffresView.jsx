@@ -12,6 +12,8 @@ export function DashboardCandOffresView({
 	setSalaryMax,
 	experienceMinYears,
 	setExperienceMinYears,
+	sortPreference,
+	setSortPreference,
 	filtered,
 	cvMatchLoading,
 	cvMatchError,
@@ -27,6 +29,14 @@ export function DashboardCandOffresView({
 	quizLoading,
 	selectedJobAlreadyApplied,
 }) {
+	const hasActiveFilters = Boolean(
+		String(searchQuery || '').trim() ||
+		String(salaryMin || '').trim() ||
+		String(salaryMax || '').trim() ||
+		String(experienceMinYears || '').trim() ||
+		sortPreference !== 'relevance'
+	)
+
 	return (
 		<div className='mt-8 space-y-6'>
 			{loadError ? (
@@ -34,19 +44,24 @@ export function DashboardCandOffresView({
 					<p className='text-sm font-semibold text-rose-800'>{loadError}</p>
 				</div>
 			) : null}
-			<div className='overflow-hidden rounded-2xl border border-[#b9d5ea] bg-gradient-to-br from-[#f8fcff] via-[#f2f9ff] to-[#e8f3fc] shadow-[0_12px_28px_rgba(8,51,93,0.1)]'>
+			<div className='overflow-hidden rounded-2xl border border-[#b9d5ea] bg-gradient-to-br from-[#f7fbff] via-[#eff7ff] to-[#e7f2fc] shadow-[0_12px_28px_rgba(8,51,93,0.1)]'>
 				<div className='flex flex-wrap items-center justify-between gap-2 border-b border-[#0d355b]/25 bg-gradient-to-r from-[#0d355b] to-[#0a5f88] px-4 py-3'>
-					<p className='text-[11px] font-black tracking-[0.12em] text-cyan-100'>RECHERCHE ET FILTRES</p>
-					<p className='text-[11px] font-semibold text-cyan-50/90'>Trouvez les offres qui correspondent à votre profil</p>
+					<div>
+						<p className='text-[11px] font-black tracking-[0.12em] text-cyan-100'>RECHERCHE ET FILTRES</p>
+						<p className='mt-1 text-[12px] font-semibold text-cyan-50/90'>Affinez rapidement les offres selon votre objectif</p>
+					</div>
+					{hasActiveFilters ? (
+						<span className='rounded-full border border-cyan-200/60 bg-white/15 px-3 py-1 text-[11px] font-semibold text-cyan-50'>Filtres actifs</span>
+					) : null}
 				</div>
 
-				<div className='space-y-3 p-4'>
-					<div className='grid gap-3 lg:grid-cols-[1fr_220px]'>
+				<div className='space-y-4 p-4'>
+					<div className='grid gap-3 xl:grid-cols-[1.3fr_0.7fr]'>
 						<div className='flex flex-col gap-3 rounded-xl border border-[#c6dff2] bg-white px-4 py-3 sm:flex-row sm:items-center'>
-							<span className='text-lg text-[#5f89ad]'>🔍</span>
+							<span className='text-lg text-[#5f89ad]'>🔎</span>
 							<input
 								type='text'
-								placeholder='Poste, entreprise, lieu, compétence…'
+								placeholder='Poste, entreprise, ville, competence...'
 								value={searchQuery}
 								onChange={(e) => setSearchQuery(e.target.value)}
 								className='w-full bg-transparent text-sm font-medium text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
@@ -56,17 +71,28 @@ export function DashboardCandOffresView({
 								onClick={() => setSearchQuery('')}
 								className='w-full shrink-0 rounded-lg border border-[#c6dff2] bg-[#f4faff] px-3 py-1.5 text-xs font-semibold text-[#2b587f] transition hover:bg-[#e8f3ff] sm:w-auto'
 							>
-								Effacer recherche
+								Effacer
 							</button>
 						</div>
-						<select className='rounded-xl border border-[#c6dff2] bg-white px-4 py-3 text-sm font-semibold text-[#1e4268] outline-none'>
-							<option>Tri: pertinence</option>
-							<option>Tri: plus récent</option>
-							<option>Tri: rémunération</option>
-						</select>
+
+						<div className='rounded-xl border border-[#c6dff2] bg-white px-4 py-3'>
+							<p className='mb-2 text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>PRÉFÉRENCE DE TRI</p>
+							<select
+								value={sortPreference}
+								onChange={(e) => setSortPreference(e.target.value)}
+								className='w-full rounded-lg border border-[#c6dff2] bg-[#f8fcff] px-3 py-2 text-sm font-semibold text-[#1e4268] outline-none'
+							>
+								<option value='relevance'>Pertinence (par defaut)</option>
+								<option value='match_desc'>Matching: decroissant</option>
+								<option value='match_asc'>Matching: croissant</option>
+								<option value='recent'>Plus recent</option>
+								<option value='salary_desc'>Remuneration: decroissante</option>
+								<option value='salary_asc'>Remuneration: croissante</option>
+							</select>
+						</div>
 					</div>
 
-					<div className='mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
+					<div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
 						<div className='rounded-xl border border-[#c6dff2] bg-white px-4 py-3'>
 							<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>RÉMUNÉRATION MIN (TND/MOIS)</p>
 							<input
@@ -78,6 +104,7 @@ export function DashboardCandOffresView({
 								className='mt-1 w-full bg-transparent text-sm font-semibold text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
 							/>
 						</div>
+
 						<div className='rounded-xl border border-[#c6dff2] bg-white px-4 py-3'>
 							<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>RÉMUNÉRATION MAX (TND/MOIS)</p>
 							<input
@@ -89,27 +116,31 @@ export function DashboardCandOffresView({
 								className='mt-1 w-full bg-transparent text-sm font-semibold text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
 							/>
 						</div>
+
 						<div className='rounded-xl border border-[#c6dff2] bg-white px-4 py-3'>
 							<p className='text-[11px] font-black tracking-[0.12em] text-[#587b9c]'>EXPÉRIENCE MINIMALE</p>
 							<input
 								type='number'
 								inputMode='numeric'
-								placeholder='années (ex: 2)'
+								placeholder='annees (ex: 2)'
 								value={experienceMinYears}
 								onChange={(e) => setExperienceMinYears(e.target.value)}
 								className='mt-1 w-full bg-transparent text-sm font-semibold text-[#173c62] outline-none placeholder:text-[#8aa5bf]'
 							/>
 						</div>
+
 						<button
 							type='button'
 							onClick={() => {
+								setSearchQuery('')
 								setSalaryMin('')
 								setSalaryMax('')
 								setExperienceMinYears('')
+								setSortPreference('relevance')
 							}}
 							className='rounded-xl border border-[#001d3e] bg-[#001d3e] px-4 py-3 text-sm font-semibold text-white transition hover:opacity-95'
 						>
-							Réinitialiser tous les filtres
+							Réinitialiser les filtres
 						</button>
 					</div>
 				</div>

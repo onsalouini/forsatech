@@ -173,6 +173,10 @@ function DashboardRec() {
 	const [loadingCandidacies, setLoadingCandidacies] = useState(false)
 	const [candidaciesError, setCandidaciesError] = useState('')
 	const [interviews, setInterviews] = useState([])
+	const [interviewReportItems, setInterviewReportItems] = useState([])
+	const [interviewReportsLoading, setInterviewReportsLoading] = useState(false)
+	const [interviewReportsError, setInterviewReportsError] = useState('')
+	const [reportEvalByInterview, setReportEvalByInterview] = useState({})
 	const [interviewForm, setInterviewForm] = useState(emptyInterviewForm)
 	const [interviewMessage, setInterviewMessage] = useState('')
 	const [interviewError, setInterviewError] = useState('')
@@ -288,6 +292,46 @@ function DashboardRec() {
 			setCvByCandidate({})
 		} finally {
 			setLoadingCandidacies(false)
+		}
+	}
+
+	const fetchRecruiterInterviewReports = async (recruiterId) => {
+		if (!recruiterId) return
+		setInterviewReportsLoading(true)
+		setInterviewReportsError('')
+		try {
+			const response = await fetch(`${API_BASE}/interviews/recruiter/${recruiterId}/reports`)
+			const data = await response.json().catch(() => ({}))
+			if (!response.ok || !data?.success) {
+				setInterviewReportsError(data?.message || 'Impossible de charger les bilans Meet.')
+				setInterviewReportItems([])
+				return
+			}
+			const items = Array.isArray(data?.items) ? data.items : []
+			setInterviewReportItems(items)
+			setReportEvalByInterview((prev) => {
+				const next = { ...prev }
+				for (const item of items) {
+					const interviewId = String(item?.interview?._id || '')
+					if (!interviewId) continue
+					const report = item?.report || null
+					if (!next[interviewId]) {
+						next[interviewId] = {
+							rating: Number(report?.recruiterEvaluation?.rating || 0),
+							comment: String(report?.recruiterEvaluation?.comment || ''),
+							saving: false,
+							message: '',
+							error: '',
+						}
+					}
+				}
+				return next
+			})
+		} catch {
+			setInterviewReportsError('Serveur indisponible. Verifiez que le backend tourne.')
+			setInterviewReportItems([])
+		} finally {
+			setInterviewReportsLoading(false)
 		}
 	}
 
@@ -409,6 +453,7 @@ function DashboardRec() {
 		if (recruiter?.id) {
 			fetchOffers(recruiter.id)
 			fetchRecruiterCandidacies(recruiter.id)
+			fetchRecruiterInterviewReports(recruiter.id)
 		}
 	}, [recruiter])
 
@@ -1092,6 +1137,104 @@ function DashboardRec() {
 		const displayName = `${recruiter?.firstName || ''} ${recruiter?.lastName || ''}`.trim() || recruiter?.company || 'Recruteur AIR'
 		const interviewQuery = interviewId ? `&interviewId=${encodeURIComponent(interviewId)}` : ''
 		navigate(`/meet?url=${encodeURIComponent(meetingLink)}&name=${encodeURIComponent(displayName)}&role=recruteur${interviewQuery}`)
+	}
+
+	const updateReportEvalField = (interviewId, field, value) => {
+		setReportEvalByInterview((prev) => ({
+			...prev,
+			[interviewId]: {
+				rating: Number(prev?.[interviewId]?.rating || 0),
+				comment: String(prev?.[interviewId]?.comment || ''),
+				saving: Boolean(prev?.[interviewId]?.saving),
+				message: String(prev?.[interviewId]?.message || ''),
+				error: String(prev?.[interviewId]?.error || ''),
+				[field]: value,
+			},
+		}))
+	}
+
+	const handleGenerateMeetReport = async (interviewId) => {
+		if (!interviewId) return
+		setInterviewReportsError('')
+		try {
+			const response = await fetch(`${API_BASE}/interviews/${encodeURIComponent(interviewId)}/report/generate`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+			})
+			const data = await response.json().catch(() => ({}))
+			if (!response.ok || !data?.success) {
+				setInterviewReportsError(data?.message || 'Impossible de generer le bilan Meet.')
+				return
+			}
+			const recruiterId = recruiter?.id || recruiter?._id
+			if (recruiterId) await fetchRecruiterInterviewReports(recruiterId)
+		} catch {
+			setInterviewReportsError('Serveur indisponible. Verifiez que le backend tourne.')
+		}
+	}
+
+	const handleSaveMeetEvaluation = async (interviewId) => {
+		if (!interviewId) return
+		const recruiterId = recruiter?.id || recruiter?._id
+		const state = reportEvalByInterview?.[interviewId] || {}
+		const rating = Number(state?.rating)
+		const comment = String(state?.comment || '')
+
+		if (!Number.isFinite(rating) || rating < 1 || rating > 5) {
+			updateReportEvalField(interviewId, 'error', 'Choisissez une note entre 1 et 5 etoiles.')
+			return
+		}
+
+		setReportEvalByInterview((prev) => ({
+			...prev,
+			[interviewId]: {
+				...(prev?.[interviewId] || {}),
+				saving: true,
+				message: '',
+				error: '',
+			},
+		}))
+
+		try {
+			const response = await fetch(`${API_BASE}/interviews/${encodeURIComponent(interviewId)}/report/evaluation`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ recruiterId, rating, comment }),
+			})
+			const data = await response.json().catch(() => ({}))
+			if (!response.ok || !data?.success) {
+				setReportEvalByInterview((prev) => ({
+					...prev,
+					[interviewId]: {
+						...(prev?.[interviewId] || {}),
+						saving: false,
+						error: data?.message || 'Impossible d enregistrer l evaluation.',
+						message: '',
+					},
+				}))
+				return
+			}
+			setReportEvalByInterview((prev) => ({
+				...prev,
+				[interviewId]: {
+					...(prev?.[interviewId] || {}),
+					saving: false,
+					message: 'Evaluation enregistree.',
+					error: '',
+				},
+			}))
+			if (recruiterId) await fetchRecruiterInterviewReports(recruiterId)
+		} catch {
+			setReportEvalByInterview((prev) => ({
+				...prev,
+				[interviewId]: {
+					...(prev?.[interviewId] || {}),
+					saving: false,
+					error: 'Serveur indisponible. Verifiez que le backend tourne.',
+					message: '',
+				},
+			}))
+		}
 	}
 
 	const updateSettingsField = (field, value) => {
@@ -2465,6 +2608,128 @@ function DashboardRec() {
 											</div>
 										)}
 									</div>
+								</div>
+
+								<div className='overflow-hidden rounded-2xl border border-cyan-100 bg-[#fbfdff] p-5 shadow-[0_0_0_1px_rgba(14,165,233,0.22),0_10px_24px_rgba(14,165,233,0.12)]'>
+									<div className='-mx-5 -mt-5 mb-4 h-1 bg-gradient-to-r from-[#06b6d4] via-[#0ea5e9] to-[#1d4ed8]' />
+									<div className='mb-4 flex flex-wrap items-center justify-between gap-3'>
+										<div>
+											<h2 className='text-xl font-black text-[#0d355b]'>Bilans Meet & evaluations</h2>
+											<p className='mt-1 text-sm text-[#4f7191]'>Accedez aux bilans d entretien et enregistrez votre notation RH.</p>
+										</div>
+										<button
+											type='button'
+											onClick={() => {
+												const recruiterId = recruiter?.id || recruiter?._id
+												if (recruiterId) fetchRecruiterInterviewReports(recruiterId)
+											}}
+											className='rounded-xl border border-[#0a7aa2] px-4 py-2 text-xs font-semibold text-[#0a5f88] transition hover:bg-[#ebfaff]'
+										>
+											Rafraichir
+										</button>
+									</div>
+
+									{interviewReportsError ? (
+										<div className='mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700'>{interviewReportsError}</div>
+									) : null}
+
+									{interviewReportsLoading ? (
+										<p className='text-sm text-[#4f7191]'>Chargement des bilans Meet...</p>
+									) : interviewReportItems.length === 0 ? (
+										<p className='rounded-lg border border-dashed border-slate-300 bg-white px-3 py-3 text-sm text-[#4f7191]'>Aucun entretien trouve pour cette section.</p>
+									) : (
+										<div className='space-y-3'>
+											{interviewReportItems.map((item) => {
+												const interview = item?.interview || {}
+												const report = item?.report || null
+												const interviewId = String(interview?._id || '')
+												const candidateName = interview?.candidateName || `${interview?.candidateId?.firstName || ''} ${interview?.candidateId?.lastName || ''}`.trim() || 'Candidat'
+												const offerTitle = interview?.jobOfferId?.title || 'Offre'
+												const evalState = reportEvalByInterview?.[interviewId] || { rating: 0, comment: '', saving: false, message: '', error: '' }
+												const score100 = report?.summary?.overallScore100
+												const stress = report?.metricsOverview?.averageStress
+												const focus = report?.behaviorAnalysis?.focusRate
+
+												return (
+													<div key={`meet-report-${interviewId}`} className='rounded-xl border border-cyan-100 bg-white p-4'>
+														<div className='flex flex-wrap items-start justify-between gap-3'>
+															<div>
+																<p className='text-sm font-black text-[#103b62]'>{candidateName}</p>
+																<p className='mt-1 text-xs text-[#587a99]'>{offerTitle} • {interview?.scheduledAt ? new Date(interview.scheduledAt).toLocaleString('fr-FR') : 'Date non definie'}</p>
+															</div>
+															<div className='flex items-center gap-2'>
+																{interview?.mode === 'Visio' && interview?.meetingLink ? (
+																	<button
+																		type='button'
+																		onClick={() => handleJoinInterview(interview.meetingLink, interviewId)}
+																		className='rounded-lg border border-cyan-300 bg-cyan-50 px-3 py-1.5 text-xs font-semibold text-cyan-700 hover:bg-cyan-100'
+																	>
+																		Ouvrir Meet
+																	</button>
+																) : null}
+																{!report ? (
+																	<button
+																		type='button'
+																		onClick={() => handleGenerateMeetReport(interviewId)}
+																		className='rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100'
+																	>
+																		Generer bilan
+																	</button>
+																) : null}
+															</div>
+														</div>
+
+														{report ? (
+															<div className='mt-3 grid gap-2 md:grid-cols-3'>
+																<div className='rounded-lg border border-cyan-100 bg-cyan-50 px-3 py-2 text-xs text-[#124268]'>Score Meet: <span className='font-black'>{Number.isFinite(score100) ? `${score100}/100` : '--'}</span></div>
+																<div className='rounded-lg border border-cyan-100 bg-cyan-50 px-3 py-2 text-xs text-[#124268]'>Stress moyen: <span className='font-black'>{Number.isFinite(stress) ? `${stress}/100` : '--'}</span></div>
+																<div className='rounded-lg border border-cyan-100 bg-cyan-50 px-3 py-2 text-xs text-[#124268]'>Focus: <span className='font-black'>{Number.isFinite(focus) ? `${focus}%` : '--'}</span></div>
+															</div>
+														) : (
+															<p className='mt-2 text-xs text-[#4f7191]'>Bilan non genere pour cet entretien.</p>
+														)}
+
+														{report ? (
+															<div className='mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3'>
+																<p className='text-[11px] font-bold uppercase tracking-wide text-[#4f7191]'>Evaluation recruteur</p>
+																<div className='mt-2 flex items-center gap-2'>
+																	{[1, 2, 3, 4, 5].map((star) => (
+																		<button
+																			key={`${interviewId}-star-${star}`}
+																			type='button'
+																			onClick={() => updateReportEvalField(interviewId, 'rating', star)}
+																			className={`h-8 w-8 rounded-full border text-sm transition ${star <= Number(evalState?.rating || 0) ? 'border-amber-300 bg-amber-100 text-amber-700' : 'border-slate-300 bg-white text-slate-400 hover:border-slate-400'}`}
+																		>
+																			★
+																		</button>
+																	))}
+																</div>
+																<textarea
+																	rows={2}
+																	value={String(evalState?.comment || '')}
+																	onChange={(e) => updateReportEvalField(interviewId, 'comment', e.target.value)}
+																	placeholder='Commentaire RH (optionnel)'
+																	className='mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-cyan-500'
+																/>
+																<div className='mt-2 flex items-center gap-2'>
+																	<button
+																		type='button'
+																		onClick={() => handleSaveMeetEvaluation(interviewId)}
+																		disabled={Boolean(evalState?.saving)}
+																		className='rounded-lg border border-cyan-300 bg-cyan-50 px-3 py-1.5 text-xs font-semibold text-cyan-700 hover:bg-cyan-100 disabled:opacity-60'
+																	>
+																		{evalState?.saving ? 'Enregistrement...' : 'Enregistrer evaluation'}
+																	</button>
+																	{evalState?.message ? <span className='text-xs text-emerald-700'>{evalState.message}</span> : null}
+																	{evalState?.error ? <span className='text-xs text-rose-700'>{evalState.error}</span> : null}
+																</div>
+															</div>
+														) : null}
+													</div>
+												)
+											})}
+										</div>
+									)}
 								</div>
 							</div>
 						) : selectedView === 'company' ? (

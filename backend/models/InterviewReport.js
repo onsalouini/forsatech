@@ -42,6 +42,27 @@ const InterviewReportSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    recruiterEvaluation: {
+      rating: {
+        type: Number,
+        min: 1,
+        max: 5,
+        default: null,
+      },
+      comment: {
+        type: String,
+        default: '',
+      },
+      evaluatedAt: {
+        type: Date,
+        default: null,
+      },
+      recruiterId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Recruiter',
+        default: null,
+      },
+    },
     raw: {
       type: mongoose.Schema.Types.Mixed,
       default: {},

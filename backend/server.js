@@ -162,16 +162,41 @@ function scoreBand(score) {
   return 'faible';
 }
 
+function computeStressScoreFromSignals(signals) {
+  const s = signals && typeof signals === 'object' ? signals : {};
+  const inactivitySec = Number(s.inactivitySec) || 0;
+  let stress = 10;
+  if (s.isVisible === false) stress += 35;
+  if (s.hasFocus === false) stress += 20;
+  if (inactivitySec > 20) stress += 15;
+  if (inactivitySec > 40) stress += 15;
+  if (inactivitySec > 90) stress += 10;
+  return Math.max(0, Math.min(100, Math.round(stress)));
+}
+
 function buildInterviewReport(interview, metrics) {
   const list = Array.isArray(metrics) ? metrics : [];
   const scores = list
     .map((m) => Number(m?.concentrationScore))
+    .filter((n) => Number.isFinite(n));
+  const stressScores = list
+    .map((m) => {
+      const explicit = Number(m?.stressScore);
+      if (Number.isFinite(explicit)) return explicit;
+      return computeStressScoreFromSignals(m?.signals);
+    })
     .filter((n) => Number.isFinite(n));
 
   const sampleCount = scores.length;
   const averageScore = sampleCount ? Math.round(scores.reduce((a, b) => a + b, 0) / sampleCount) : null;
   const minScore = sampleCount ? Math.min(...scores) : null;
   const maxScore = sampleCount ? Math.max(...scores) : null;
+  const averageStress = stressScores.length ? Math.round(stressScores.reduce((a, b) => a + b, 0) / stressScores.length) : null;
+  const maxStress = stressScores.length ? Math.max(...stressScores) : null;
+  const calmScore = Number.isFinite(averageStress) ? Math.max(0, 100 - averageStress) : null;
+  const overallScore100 = Number.isFinite(averageScore)
+    ? Math.round((averageScore * 0.75) + ((Number.isFinite(calmScore) ? calmScore : averageScore) * 0.25))
+    : null;
 
   const firstSample = list[0]?.sampledAt ? new Date(list[0].sampledAt) : null;
   const lastSample = list[list.length - 1]?.sampledAt ? new Date(list[list.length - 1].sampledAt) : null;
@@ -198,6 +223,7 @@ function buildInterviewReport(interview, metrics) {
   const highMoments = scores.filter((s) => s >= 75).length;
 
   const globalBand = scoreBand(averageScore);
+  const stressBand = scoreBand(Number.isFinite(calmScore) ? calmScore : null);
   const recommendations = [];
   if (!sampleCount) {
     recommendations.push('Aucune mesure disponible. Verifier que le candidat a rejoint l entretien via AIR Meet.');
@@ -206,6 +232,7 @@ function buildInterviewReport(interview, metrics) {
     if ((inactivityRate || 0) > 35) recommendations.push('Fractionner l entretien en blocs plus dynamiques avec interactions frequentes.');
     if ((averageScore || 0) < 60) recommendations.push('Prevoir un second entretien plus court pour confirmer les observations.');
     if ((averageScore || 0) >= 75) recommendations.push('Concentration stable. Vous pouvez augmenter le niveau des questions de profondeur.');
+    if ((averageStress || 0) > 55) recommendations.push('Stress detecte comme eleve. Ajouter une phase de mise en confiance au debut de l entretien.');
   }
 
   const summaryText = !sampleCount
@@ -223,6 +250,7 @@ function buildInterviewReport(interview, metrics) {
       generatedAt: new Date(),
       overallBand: globalBand,
       summaryText,
+      overallScore100,
       mode: interview?.mode || '',
       scheduledAt: interview?.scheduledAt || null,
       candidateName: interview?.candidateName || '',
@@ -232,6 +260,9 @@ function buildInterviewReport(interview, metrics) {
       averageScore,
       minScore,
       maxScore,
+      averageStress,
+      maxStress,
+      calmScore,
       durationMinutes,
       scoreDistribution: {
         highMoments,
@@ -243,9 +274,11 @@ function buildInterviewReport(interview, metrics) {
       visibilityRate: visibleRate,
       focusRate,
       prolongedInactivityRate: inactivityRate,
+      stressBand,
       interpretation: {
         visibility: visibleRate === null ? 'Aucune donnee' : visibleRate >= 85 ? 'Tres bonne presence visuelle' : visibleRate >= 65 ? 'Presence correcte' : 'Presence visuelle instable',
         focus: focusRate === null ? 'Aucune donnee' : focusRate >= 80 ? 'Attention ecran stable' : focusRate >= 60 ? 'Attention variable' : 'Attention faible',
+        stress: averageStress === null ? 'Aucune donnee' : averageStress <= 35 ? 'Stress faible a modere' : averageStress <= 60 ? 'Stress moyen' : 'Stress eleve',
       },
     },
     recommendations,
@@ -826,9 +859,10 @@ const connectDB = async () => {
   try {
     await mongoose.connect(MONGODB_URI);
     console.log('MongoDB connected');
+    return true;
   } catch (error) {
     console.error('MongoDB connection error:', error.message);
-    process.exit(1);
+    return false;
   }
 };
 
@@ -4152,6 +4186,53 @@ app.get('/api/interviews/recruiter/:recruiterId', async (req, res) => {
   }
 });
 
+app.get('/api/interviews/recruiter/:recruiterId/reports', async (req, res) => {
+  try {
+    const { recruiterId } = req.params;
+    const limit = Math.min(Math.max(Number(req.query.limit) || 120, 1), 300);
+
+    if (!recruiterId || !mongoose.Types.ObjectId.isValid(recruiterId)) {
+      return res.status(400).json({ success: false, message: 'recruiterId invalide.' });
+    }
+
+    const interviews = await Interview.find({ recruiterId })
+      .populate('candidateId', 'firstName lastName email')
+      .populate('jobOfferId', 'title location contractType')
+      .sort({ scheduledAt: -1 })
+      .limit(limit)
+      .lean();
+
+    if (!interviews.length) {
+      return res.status(200).json({ success: true, items: [] });
+    }
+
+    const interviewIds = interviews.map((it) => it?._id).filter(Boolean);
+    const reports = await InterviewReport.find({ interviewId: { $in: interviewIds } })
+      .sort({ generatedAt: -1 })
+      .lean();
+
+    const reportByInterviewId = new Map();
+    for (const report of reports) {
+      const key = String(report?.interviewId || '');
+      if (!key || reportByInterviewId.has(key)) continue;
+      reportByInterviewId.set(key, report);
+    }
+
+    const items = interviews.map((interview) => ({
+      interview,
+      report: reportByInterviewId.get(String(interview?._id || '')) || null,
+    }));
+
+    return res.status(200).json({ success: true, items });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur pendant la recuperation des bilans recruteur.',
+      error: error.message,
+    });
+  }
+});
+
 app.post('/api/interviews/:interviewId/metrics', async (req, res) => {
   try {
     const { interviewId } = req.params;
@@ -4159,16 +4240,21 @@ app.post('/api/interviews/:interviewId/metrics', async (req, res) => {
       return res.status(400).json({ success: false, message: 'interviewId invalide.' });
     }
 
-    const { concentrationScore, role, sampledAt, signals } = req.body || {};
+    const { concentrationScore, stressScore, role, sampledAt, signals } = req.body || {};
     const numericScore = Number(concentrationScore);
     if (!Number.isFinite(numericScore)) {
       return res.status(400).json({ success: false, message: 'concentrationScore est requis.' });
     }
+    const numericStress = Number(stressScore);
+    const computedStress = Number.isFinite(numericStress)
+      ? Math.max(0, Math.min(100, Math.round(numericStress)))
+      : computeStressScoreFromSignals(signals);
 
     const metric = await InterviewMetric.create({
       interviewId,
       role: role === 'recruiter' ? 'recruiter' : role === 'system' ? 'system' : 'candidate',
       concentrationScore: Math.max(0, Math.min(100, Math.round(numericScore))),
+      stressScore: computedStress,
       sampledAt: sampledAt ? new Date(sampledAt) : new Date(),
       signals: signals && typeof signals === 'object' ? signals : {},
     });
@@ -4204,6 +4290,8 @@ app.get('/api/interviews/:interviewId/metrics/summary', async (req, res) => {
           avgScore: { $avg: '$concentrationScore' },
           minScore: { $min: '$concentrationScore' },
           maxScore: { $max: '$concentrationScore' },
+          avgStress: { $avg: '$stressScore' },
+          maxStress: { $max: '$stressScore' },
           sampleCount: { $sum: 1 },
         },
       },
@@ -4211,6 +4299,12 @@ app.get('/api/interviews/:interviewId/metrics/summary', async (req, res) => {
 
     const latest = await InterviewMetric.findOne({ interviewId, role }).sort({ sampledAt: -1 }).lean();
     const averageScore = stats?.avgScore ? Math.round(stats.avgScore) : null;
+    const averageStress = Number.isFinite(stats?.avgStress) ? Math.round(stats.avgStress) : null;
+    const calmScore = Number.isFinite(averageStress) ? Math.max(0, 100 - averageStress) : null;
+    const overallScore100 = Number.isFinite(averageScore)
+      ? Math.round((averageScore * 0.75) + ((Number.isFinite(calmScore) ? calmScore : averageScore) * 0.25))
+      : null;
+
     const status = averageScore === null
       ? 'Aucune donnée'
       : averageScore >= 75
@@ -4228,7 +4322,12 @@ app.get('/api/interviews/:interviewId/metrics/summary', async (req, res) => {
         averageScore,
         minScore: Number.isFinite(stats?.minScore) ? Math.round(stats.minScore) : null,
         maxScore: Number.isFinite(stats?.maxScore) ? Math.round(stats.maxScore) : null,
+        averageStress,
+        maxStress: Number.isFinite(stats?.maxStress) ? Math.round(stats.maxStress) : null,
+        calmScore,
+        overallScore100,
         latestScore: Number.isFinite(latest?.concentrationScore) ? Math.round(latest.concentrationScore) : null,
+        latestStress: Number.isFinite(latest?.stressScore) ? Math.round(latest.stressScore) : null,
         latestAt: latest?.sampledAt || null,
         status,
       },
@@ -4292,6 +4391,98 @@ app.get('/api/interviews/:interviewId/report', async (req, res) => {
     return res.status(200).json({ success: true, report });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Erreur serveur lecture bilan.', error: error.message });
+  }
+});
+
+app.post('/api/interviews/:interviewId/report/evaluation', async (req, res) => {
+  try {
+    const { interviewId } = req.params;
+    if (!interviewId || !mongoose.Types.ObjectId.isValid(interviewId)) {
+      return res.status(400).json({ success: false, message: 'interviewId invalide.' });
+    }
+
+    const recruiterId = String(req.body?.recruiterId || '').trim();
+    const rating = Number(req.body?.rating);
+    const comment = String(req.body?.comment || '').trim();
+
+    if (!Number.isFinite(rating) || rating < 1 || rating > 5) {
+      return res.status(400).json({ success: false, message: 'rating doit etre entre 1 et 5.' });
+    }
+
+    const interview = await Interview.findById(interviewId).select('_id recruiterId candidateId').lean();
+    if (!interview) {
+      return res.status(404).json({ success: false, message: 'Entretien introuvable.' });
+    }
+
+    if (recruiterId && mongoose.Types.ObjectId.isValid(recruiterId)) {
+      if (String(interview.recruiterId) !== recruiterId) {
+        return res.status(403).json({ success: false, message: 'Ce recruteur ne peut pas evaluer cet entretien.' });
+      }
+    }
+
+    let report = await InterviewReport.findOne({ interviewId });
+    if (!report) {
+      const metrics = await InterviewMetric.find({ interviewId, role: 'candidate' }).sort({ sampledAt: 1 }).lean();
+      const reportPayload = buildInterviewReport(interview, metrics);
+      report = await InterviewReport.create({
+        interviewId,
+        candidateId: interview.candidateId || undefined,
+        recruiterId: interview.recruiterId || undefined,
+        generatedAt: new Date(),
+        ...reportPayload,
+      });
+    }
+
+    report.recruiterEvaluation = {
+      rating: Math.round(rating),
+      comment: comment.slice(0, 1200),
+      evaluatedAt: new Date(),
+      recruiterId: recruiterId && mongoose.Types.ObjectId.isValid(recruiterId)
+        ? new mongoose.Types.ObjectId(recruiterId)
+        : interview.recruiterId,
+    };
+    await report.save();
+
+    return res.status(200).json({ success: true, report });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur enregistrement evaluation.', error: error.message });
+  }
+});
+
+app.get('/api/interviews/candidate/:candidateId/reports', async (req, res) => {
+  try {
+    const { candidateId } = req.params;
+    if (!candidateId || !mongoose.Types.ObjectId.isValid(candidateId)) {
+      return res.status(400).json({ success: false, message: 'candidateId invalide.' });
+    }
+
+    const reports = await InterviewReport.find({ candidateId })
+      .sort({ generatedAt: -1 })
+      .lean();
+
+    if (!reports.length) {
+      return res.status(200).json({ success: true, reports: [] });
+    }
+
+    const interviewIds = reports
+      .map((r) => r?.interviewId)
+      .filter(Boolean)
+      .map((id) => String(id));
+
+    const interviews = await Interview.find({ _id: { $in: interviewIds } })
+      .select('_id jobOfferId candidateName scheduledAt mode status meetingLink location')
+      .populate('jobOfferId', 'title location')
+      .lean();
+
+    const byInterviewId = new Map(interviews.map((it) => [String(it._id), it]));
+    const result = reports.map((report) => ({
+      ...report,
+      interview: byInterviewId.get(String(report.interviewId)) || null,
+    }));
+
+    return res.status(200).json({ success: true, reports: result });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur lecture bilans candidat.', error: error.message });
   }
 });
 
@@ -4828,8 +5019,11 @@ app.patch('/api/dm/read', async (req, res) => {
   }
 });
 
-connectDB().then(() => {
+connectDB().finally(() => {
   httpServer.listen(PORT, () => {
     console.log(`Backend running on http://localhost:${PORT}`);
+    if (mongoose.connection.readyState !== 1) {
+      console.warn('Backend started without MongoDB connection. Database-backed routes will fail until MongoDB is available.');
+    }
   });
 });

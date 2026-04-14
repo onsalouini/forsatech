@@ -59,6 +59,7 @@ function DashboardCand() {
 	const [salaryMin, setSalaryMin] = useState('')
 	const [salaryMax, setSalaryMax] = useState('')
 	const [experienceMinYears, setExperienceMinYears] = useState('')
+	const [sortPreference, setSortPreference] = useState('relevance')
 	const [currentTime, setCurrentTime] = useState(new Date())
 	const [jobs, setJobs] = useState([])
 	const [candidacies, setCandidacies] = useState([])
@@ -115,6 +116,12 @@ function DashboardCand() {
 	const [offerHelpError, setOfferHelpError] = useState('')
 	const [assistantHydrated, setAssistantHydrated] = useState(false)
 	const [offerHelpHydrated, setOfferHelpHydrated] = useState(false)
+	const [appFeedbackForm, setAppFeedbackForm] = useState({ rating: 0, comment: '' })
+	const [appFeedbackSaving, setAppFeedbackSaving] = useState(false)
+	const [appFeedbackMessage, setAppFeedbackMessage] = useState('')
+	const [appFeedbackError, setAppFeedbackError] = useState('')
+	const [appFeedbackSummary, setAppFeedbackSummary] = useState({ averageRating: null, totalFeedbacks: 0 })
+	const [appFeedbackOpen, setAppFeedbackOpen] = useState(false)
 
 	const normalizedSuggestions = useMemo(() => normalizeSuggestionsPayload(suggestionsData), [suggestionsData])
 	const activeCvMeta = useMemo(() => cvHistory.find((x) => x?.isActive) || null, [cvHistory])
@@ -163,6 +170,47 @@ function DashboardCand() {
 		setCandidate,
 		setSelectedView,
 	})
+
+	useEffect(() => {
+		if (!candidateId) return
+
+		let cancelled = false
+		const fetchAppFeedback = async () => {
+			try {
+				const [mineRes, summaryRes] = await Promise.all([
+					fetch(`${API_BASE}/app-feedback/mine?userId=${encodeURIComponent(candidateId)}&userRole=candidate`),
+					fetch(`${API_BASE}/app-feedback/summary`),
+				])
+
+				const mineData = await mineRes.json().catch(() => ({}))
+				const summaryData = await summaryRes.json().catch(() => ({}))
+				if (cancelled) return
+
+				if (mineRes.ok && mineData?.success && mineData?.feedback) {
+					setAppFeedbackForm({
+						rating: Number(mineData.feedback.rating || 0),
+						comment: String(mineData.feedback.comment || ''),
+					})
+				}
+
+				if (summaryRes.ok && summaryData?.success && summaryData?.summary) {
+					setAppFeedbackSummary({
+						averageRating: Number.isFinite(summaryData.summary.averageRating) ? Number(summaryData.summary.averageRating) : null,
+						totalFeedbacks: Number(summaryData.summary.totalFeedbacks || 0),
+					})
+				}
+			} catch {
+				if (!cancelled) {
+					setAppFeedbackSummary((prev) => ({ ...prev }))
+				}
+			}
+		}
+
+		fetchAppFeedback()
+		return () => {
+			cancelled = true
+		}
+	}, [candidateId])
 
 	useEffect(() => {
 		try {
@@ -695,6 +743,15 @@ function DashboardCand() {
 	}, [dashboardStats])
 
 	const interviewCalendarData = useMemo(() => {
+		const toLocalDateKey = (value) => {
+			const d = value instanceof Date ? value : new Date(value)
+			if (Number.isNaN(d.getTime())) return ''
+			const y = d.getFullYear()
+			const m = String(d.getMonth() + 1).padStart(2, '0')
+			const day = String(d.getDate()).padStart(2, '0')
+			return `${y}-${m}-${day}`
+		}
+
 		const interviews = Array.isArray(dashboardStats?.offers?.upcomingInterviews)
 			? dashboardStats.offers.upcomingInterviews
 			: []
@@ -704,9 +761,11 @@ function DashboardCand() {
 			if (!i?.scheduledAt) continue
 			const dt = new Date(i.scheduledAt)
 			if (Number.isNaN(dt.getTime())) continue
-			const key = dt.toISOString().slice(0, 10)
+			const key = toLocalDateKey(dt)
+			if (!key) continue
+			const offerTitle = String(i?.offerTitle || i?.jobOfferTitle || i?.title || i?.jobOffer?.title || 'Offre').trim() || 'Offre'
 			const entry = {
-				title: String(i?.title || 'Offre'),
+				offerTitle,
 				time: dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
 			}
 			const prev = byDate.get(key) || []
@@ -725,13 +784,13 @@ function DashboardCand() {
 
 		for (let day = 1; day <= daysInMonth; day += 1) {
 			const date = new Date(monthStart.getFullYear(), monthStart.getMonth(), day)
-			const key = date.toISOString().slice(0, 10)
+			const key = toLocalDateKey(date)
 			const events = byDate.get(key) || []
 			cells.push({
 				day,
 				key,
 				events,
-				title: events.map((e) => `${e.time} - ${e.title}`).join(' | '),
+				title: events.map((e) => `${e.time} - ${e.offerTitle}`).join(' | '),
 			})
 		}
 
@@ -831,6 +890,13 @@ function DashboardCand() {
 
 	const handleRefreshPage = () => {
 		window.location.reload()
+	}
+
+	const handleJoinInterviewMeet = (meetingLink, interviewId) => {
+		if (!meetingLink) return
+		const displayName = `${candidate?.firstName || ''} ${candidate?.lastName || ''}`.trim() || 'Candidat AIR'
+		const interviewQuery = interviewId ? `&interviewId=${encodeURIComponent(interviewId)}` : ''
+		navigate(`/meet?url=${encodeURIComponent(meetingLink)}&name=${encodeURIComponent(displayName)}&role=candidat${interviewQuery}`)
 	}
 
 	const handleAnalyzeCv = async () => {
@@ -987,7 +1053,7 @@ function DashboardCand() {
 		const maxSalaryValue = hasMaxSalary ? Number(salaryMax) : null
 		const minExpValue = hasMinExp ? Number(experienceMinYears) : null
 
-		return jobs.filter((j) => {
+		const filteredJobs = jobs.filter((j) => {
 			if (q) {
 				const hay = `${j.title} ${j.location} ${j.company} ${j.desc || ''}`.toLowerCase()
 				if (!hay.includes(q)) return false
@@ -1009,7 +1075,47 @@ function DashboardCand() {
 
 			return true
 		})
-	}, [searchQuery, salaryMin, salaryMax, experienceMinYears, jobs])
+
+		const sortedJobs = [...filteredJobs]
+		switch (sortPreference) {
+			case 'match_desc':
+				sortedJobs.sort((a, b) => (Number.isFinite(b?.matchScore) ? b.matchScore : -1) - (Number.isFinite(a?.matchScore) ? a.matchScore : -1))
+				break
+			case 'match_asc':
+				sortedJobs.sort((a, b) => {
+					const aScore = Number.isFinite(a?.matchScore) ? a.matchScore : Number.POSITIVE_INFINITY
+					const bScore = Number.isFinite(b?.matchScore) ? b.matchScore : Number.POSITIVE_INFINITY
+					return aScore - bScore
+				})
+				break
+			case 'recent':
+				sortedJobs.sort((a, b) => (new Date(b?.createdAt || 0).getTime() || 0) - (new Date(a?.createdAt || 0).getTime() || 0))
+				break
+			case 'salary_desc':
+				sortedJobs.sort((a, b) => {
+					const aRange = parseSalaryRange(a?.salary)
+					const bRange = parseSalaryRange(b?.salary)
+					const aValue = Number.isFinite(aRange?.max) ? aRange.max : -1
+					const bValue = Number.isFinite(bRange?.max) ? bRange.max : -1
+					return bValue - aValue
+				})
+				break
+			case 'salary_asc':
+				sortedJobs.sort((a, b) => {
+					const aRange = parseSalaryRange(a?.salary)
+					const bRange = parseSalaryRange(b?.salary)
+					const aValue = Number.isFinite(aRange?.min) ? aRange.min : Number.POSITIVE_INFINITY
+					const bValue = Number.isFinite(bRange?.min) ? bRange.min : Number.POSITIVE_INFINITY
+					return aValue - bValue
+				})
+				break
+			default:
+				// Keep backend/current ordering for relevance.
+				break
+		}
+
+		return sortedJobs
+	}, [searchQuery, salaryMin, salaryMax, experienceMinYears, jobs, sortPreference])
 
 	const selectedJob = useMemo(() => {
 		if (!selectedJobId && jobs.length > 0) return jobs[0]
@@ -1135,6 +1241,56 @@ function DashboardCand() {
 
 	const handleApply = async () => {
 		await loadQuizSession(quizMode)
+	}
+
+	const handleSubmitAppFeedback = async (e) => {
+		e.preventDefault()
+		setAppFeedbackError('')
+		setAppFeedbackMessage('')
+
+		if (!candidateId) {
+			setAppFeedbackError('Session candidat invalide. Reconnectez-vous.')
+			return
+		}
+
+		if (!Number.isFinite(appFeedbackForm.rating) || appFeedbackForm.rating < 1 || appFeedbackForm.rating > 5) {
+			setAppFeedbackError('Veuillez choisir une note entre 1 et 5 etoiles.')
+			return
+		}
+
+		setAppFeedbackSaving(true)
+		try {
+			const response = await fetch(`${API_BASE}/app-feedback`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					userId: candidateId,
+					userRole: 'candidate',
+					rating: appFeedbackForm.rating,
+					comment: appFeedbackForm.comment,
+				}),
+			})
+
+			const data = await response.json().catch(() => ({}))
+			if (!response.ok || !data?.success) {
+				setAppFeedbackError(data?.message || 'Impossible d enregistrer votre feedback.')
+				return
+			}
+
+			setAppFeedbackMessage(data?.message || 'Merci pour votre feedback.')
+			const summaryRes = await fetch(`${API_BASE}/app-feedback/summary`)
+			const summaryData = await summaryRes.json().catch(() => ({}))
+			if (summaryRes.ok && summaryData?.success && summaryData?.summary) {
+				setAppFeedbackSummary({
+					averageRating: Number.isFinite(summaryData.summary.averageRating) ? Number(summaryData.summary.averageRating) : null,
+					totalFeedbacks: Number(summaryData.summary.totalFeedbacks || 0),
+				})
+			}
+		} catch {
+			setAppFeedbackError('Serveur indisponible. Verifiez que le backend tourne.')
+		} finally {
+			setAppFeedbackSaving(false)
+		}
 	}
 
 	const handleQuizAnswerChange = (questionId, optionKey) => {
@@ -1373,6 +1529,8 @@ function DashboardCand() {
 								setSalaryMax={setSalaryMax}
 								experienceMinYears={experienceMinYears}
 								setExperienceMinYears={setExperienceMinYears}
+								sortPreference={sortPreference}
+								setSortPreference={setSortPreference}
 								filtered={filtered}
 								cvMatchLoading={cvMatchLoading}
 								cvMatchError={cvMatchError}
@@ -1426,6 +1584,7 @@ function DashboardCand() {
 								notificationsLoading={notificationsLoading}
 								notifications={notifications}
 								markNotificationAsRead={markNotificationAsRead}
+								handleJoinInterviewMeet={handleJoinInterviewMeet}
 							/>
 						) : selectedView === 'settings' ? (
 							<DashboardCandSettingsView
@@ -1533,6 +1692,57 @@ function DashboardCand() {
 				onClose={handleCloseQuizModal}
 				handleSubmitQuizAndApply={handleSubmitQuizAndApply}
 			/>
+
+			<div className='fixed bottom-4 left-4 z-40'>
+				<button
+					type='button'
+					onClick={() => setAppFeedbackOpen((prev) => !prev)}
+					aria-label='Ouvrir le feedback AIR'
+					title='Feedback AIR'
+					className='flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-r from-[#0ea5e9] to-[#1d4ed8] text-lg font-black text-white shadow-xl transition hover:brightness-110'
+				>
+					★
+				</button>
+				{appFeedbackOpen ? (
+					<div className='absolute bottom-14 left-0 w-[86vw] max-w-xs rounded-2xl border border-cyan-100 bg-white p-4 shadow-2xl'>
+						<div className='flex items-start justify-between gap-2'>
+							<div>
+								<p className='text-sm font-black text-[#0d355b]'>Votre avis sur AIR</p>
+								<p className='mt-1 text-xs text-[#4f7191]'>Moyenne globale: {appFeedbackSummary.averageRating ? `${appFeedbackSummary.averageRating}/5` : '—'} • {appFeedbackSummary.totalFeedbacks} avis</p>
+							</div>
+							<button type='button' onClick={() => setAppFeedbackOpen(false)} className='rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50'>Fermer</button>
+						</div>
+
+						{appFeedbackError ? <div className='mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700'>{appFeedbackError}</div> : null}
+						{appFeedbackMessage ? <div className='mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700'>{appFeedbackMessage}</div> : null}
+
+						<form className='mt-3 space-y-3' onSubmit={handleSubmitAppFeedback}>
+							<div className='flex items-center gap-2'>
+								{[1, 2, 3, 4, 5].map((star) => (
+									<button
+										key={star}
+										type='button'
+										onClick={() => setAppFeedbackForm((prev) => ({ ...prev, rating: star }))}
+										className={`h-9 w-9 rounded-full border text-base transition ${star <= appFeedbackForm.rating ? 'border-amber-300 bg-amber-100 text-amber-600' : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300'}`}
+									>
+										★
+									</button>
+								))}
+							</div>
+							<textarea
+								rows={3}
+								value={appFeedbackForm.comment}
+								onChange={(e) => setAppFeedbackForm((prev) => ({ ...prev, comment: e.target.value }))}
+								placeholder='Votre commentaire (optionnel)'
+								className='w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-cyan-500'
+							/>
+							<button type='submit' disabled={appFeedbackSaving} className='w-full rounded-xl bg-gradient-to-r from-[#0ea5e9] to-[#1d4ed8] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60'>
+								{appFeedbackSaving ? 'Envoi...' : 'Envoyer'}
+							</button>
+						</form>
+					</div>
+				) : null}
+			</div>
 		</section>
 	)
 }

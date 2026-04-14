@@ -15,11 +15,16 @@ function InterviewMeet() {
 	const initialName = params.get('name') || ''
 	const [displayName, setDisplayName] = useState(initialName)
 	const [localScore, setLocalScore] = useState(null)
-	const [recruiterSummarye , setRecruiterSummary] = useState(null)
+	const [localStress, setLocalStress] = useState(null)
+	const [recruiterSummary, setRecruiterSummary] = useState(null)
 	const [summaryError, setSummaryError] = useState('')
 	const [reportData, setReportData] = useState(null)
 	const [reportLoading, setReportLoading] = useState(false)
 	const [reportError, setReportError] = useState('')
+	const [evaluationRating, setEvaluationRating] = useState(0)
+	const [evaluationComment, setEvaluationComment] = useState('')
+	const [evaluationSaving, setEvaluationSaving] = useState(false)
+	const [evaluationMessage, setEvaluationMessage] = useState('')
 	const lastActivityRef = useRef(Date.now())
 	const hasWindowFocusRef = useRef(true)
 
@@ -88,6 +93,13 @@ function InterviewMeet() {
 			const inactivitySec = Math.round((Date.now() - lastActivityRef.current) / 1000)
 			const isVisible = document.visibilityState === 'visible'
 			const hasFocus = hasWindowFocusRef.current
+			let stress = 10
+			if (!isVisible) stress += 35
+			if (!hasFocus) stress += 20
+			if (inactivitySec > 20) stress += 15
+			if (inactivitySec > 40) stress += 15
+			if (inactivitySec > 90) stress += 10
+			stress = clamp(Math.round(stress), 0, 100)
 			let score = 100
 			if (!isVisible) score -= 40
 			if (!hasFocus) score -= 20
@@ -95,6 +107,7 @@ function InterviewMeet() {
 			if (inactivitySec > 40) score -= 25
 			score = clamp(Math.round(score), 0, 100)
 			setLocalScore(score)
+			setLocalStress(stress)
 
 			fetch(`${API_BASE}/interviews/${encodeURIComponent(interviewId)}/metrics`, {
 				method: 'POST',
@@ -102,11 +115,13 @@ function InterviewMeet() {
 				body: JSON.stringify({
 					role: 'candidate',
 					concentrationScore: score,
+					stressScore: stress,
 					sampledAt: new Date().toISOString(),
 					signals: {
 						isVisible,
 						hasFocus,
 						inactivitySec,
+						stressScore: stress,
 					},
 				}),
 			}).catch(() => {
@@ -145,13 +160,33 @@ function InterviewMeet() {
 	const loadExistingReport = async () => {
 		if (!interviewId || normalizedRole !== 'recruiter') return
 		setReportError('')
+		setEvaluationMessage('')
 		try {
 			const res = await fetch(`${API_BASE}/interviews/${encodeURIComponent(interviewId)}/report`)
 			const data = await res.json().catch(() => ({}))
 			if (!res.ok || !data?.success) {
+				if (res.status === 404) {
+					const genRes = await fetch(`${API_BASE}/interviews/${encodeURIComponent(interviewId)}/report/generate`, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+					})
+					const genData = await genRes.json().catch(() => ({}))
+					if (!genRes.ok || !genData?.success) {
+						throw new Error(genData?.message || 'Impossible de generer le bilan.')
+					}
+					const autoReport = genData.report || null
+					setReportData(autoReport)
+					setEvaluationRating(Number(autoReport?.recruiterEvaluation?.rating || 0))
+					setEvaluationComment(String(autoReport?.recruiterEvaluation?.comment || ''))
+					setEvaluationMessage('Bilan genere automatiquement.')
+					return
+				}
 				throw new Error(data?.message || 'Aucun bilan disponible pour le moment.')
 			}
-			setReportData(data.report || null)
+			const nextReport = data.report || null
+			setReportData(nextReport)
+			setEvaluationRating(Number(nextReport?.recruiterEvaluation?.rating || 0))
+			setEvaluationComment(String(nextReport?.recruiterEvaluation?.comment || ''))
 		} catch (e) {
 			setReportData(null)
 			setReportError(String(e?.message || 'Erreur bilan'))
@@ -174,11 +209,50 @@ function InterviewMeet() {
 			if (!res.ok || !data?.success) {
 				throw new Error(data?.message || 'Impossible de generer le bilan complet.')
 			}
-			setReportData(data.report || null)
+			const nextReport = data.report || null
+			setReportData(nextReport)
+			setEvaluationRating(Number(nextReport?.recruiterEvaluation?.rating || 0))
+			setEvaluationComment(String(nextReport?.recruiterEvaluation?.comment || ''))
 		} catch (e) {
 			setReportError(String(e?.message || 'Erreur bilan'))
 		} finally {
 			setReportLoading(false)
+		}
+	}
+
+	const handleSaveRecruiterEvaluation = async () => {
+		if (!interviewId || normalizedRole !== 'recruiter') return
+		setEvaluationMessage('')
+		setReportError('')
+		if (!Number.isFinite(evaluationRating) || evaluationRating < 1 || evaluationRating > 5) {
+			setReportError('Choisissez une note entre 1 et 5 etoiles.')
+			return
+		}
+
+		setEvaluationSaving(true)
+		try {
+			const recruiterRaw = localStorage.getItem('airRecruiter')
+			const recruiter = recruiterRaw ? JSON.parse(recruiterRaw) : null
+			const recruiterId = recruiter?.id || recruiter?._id || ''
+			const res = await fetch(`${API_BASE}/interviews/${encodeURIComponent(interviewId)}/report/evaluation`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					recruiterId,
+					rating: evaluationRating,
+					comment: evaluationComment,
+				}),
+			})
+			const data = await res.json().catch(() => ({}))
+			if (!res.ok || !data?.success) {
+				throw new Error(data?.message || 'Impossible d enregistrer l evaluation.')
+			}
+			setReportData(data.report || null)
+			setEvaluationMessage('Evaluation enregistree avec succes.')
+		} catch (e) {
+			setReportError(String(e?.message || 'Erreur evaluation'))
+		} finally {
+			setEvaluationSaving(false)
 		}
 	}
 
@@ -219,10 +293,10 @@ function InterviewMeet() {
 					<p className='text-xs font-bold uppercase tracking-[0.12em] text-cyan-300'>{role || 'entretien'}</p>
 					<p className='text-sm font-semibold text-white/90'>{roomLabel}</p>
 					{normalizedRole === 'candidate' ? (
-						<p className='mt-1 text-xs text-slate-300'>Concentration locale (indicatif): {localScore ?? '--'}/100</p>
+						<p className='mt-1 text-xs text-slate-300'>Concentration locale: {localScore ?? '--'}/100 | Stress estime: {localStress ?? '--'}/100</p>
 					) : null}
 					{normalizedRole === 'recruiter' ? (
-						<p className='mt-1 text-xs text-slate-300'>Concentration candidat: {recruiterSummary?.averageScore ?? '--'}/100 ({recruiterSummary?.status || 'En attente'})</p>
+						<p className='mt-1 text-xs text-slate-300'>Score global candidat: {recruiterSummary?.overallScore100 ?? '--'}/100 | Concentration: {recruiterSummary?.averageScore ?? '--'} | Stress: {recruiterSummary?.averageStress ?? '--'}</p>
 					) : null}
 				</div>
 				<div className='flex items-center gap-2'>
@@ -271,9 +345,10 @@ function InterviewMeet() {
 			{normalizedRole === 'recruiter' ? (
 				<div className='mx-4 mt-3 rounded-xl border border-cyan-400/30 bg-cyan-950/30 px-4 py-3 text-xs text-cyan-100'>
 					<p className='font-bold'>Panel concentration (indicatif)</p>
-					<p className='mt-1'>Moyenne 15 min: {recruiterSummary?.averageScore ?? '--'} | Derniere mesure: {recruiterSummary?.latestScore ?? '--'} | Echantillons: {recruiterSummary?.sampleCount ?? 0}</p>
+					<p className='mt-1'>Score global: {recruiterSummary?.overallScore100 ?? '--'}/100 | Concentration: {recruiterSummary?.averageScore ?? '--'} | Stress: {recruiterSummary?.averageStress ?? '--'} | Echantillons: {recruiterSummary?.sampleCount ?? 0}</p>
 					{summaryError ? <p className='mt-1 text-rose-200'>{summaryError}</p> : null}
 					{reportError ? <p className='mt-1 text-rose-200'>{reportError}</p> : null}
+					{evaluationMessage ? <p className='mt-1 text-emerald-200'>{evaluationMessage}</p> : null}
 					{reportData ? (
 						<div className='mt-3 rounded-lg border border-cyan-300/30 bg-slate-900/40 p-3 text-cyan-50'>
 							<div className='flex items-center justify-between gap-2'>
@@ -287,8 +362,38 @@ function InterviewMeet() {
 								</button>
 							</div>
 							<p className='mt-2'>Resume: {reportData?.summary?.summaryText || '—'}</p>
-							<p className='mt-1'>Score moyen: {reportData?.metricsOverview?.averageScore ?? '--'} | Duree: {reportData?.metricsOverview?.durationMinutes ?? 0} min | Echantillons: {reportData?.metricsOverview?.sampleCount ?? 0}</p>
-							<p className='mt-1'>Visibilite: {reportData?.behaviorAnalysis?.visibilityRate ?? '--'}% | Focus: {reportData?.behaviorAnalysis?.focusRate ?? '--'}%</p>
+							<p className='mt-1'>Score global: {reportData?.summary?.overallScore100 ?? '--'}/100 | Concentration: {reportData?.metricsOverview?.averageScore ?? '--'} | Stress: {reportData?.metricsOverview?.averageStress ?? '--'}</p>
+							<p className='mt-1'>Duree: {reportData?.metricsOverview?.durationMinutes ?? 0} min | Echantillons: {reportData?.metricsOverview?.sampleCount ?? 0} | Focus: {reportData?.behaviorAnalysis?.focusRate ?? '--'}%</p>
+							<div className='mt-3 rounded-md border border-cyan-300/25 bg-slate-900/50 p-2'>
+								<p className='text-[11px] font-bold uppercase tracking-wide text-cyan-200'>Evaluation recruteur</p>
+								<div className='mt-2 flex items-center gap-2'>
+									{[1, 2, 3, 4, 5].map((star) => (
+										<button
+											key={`eval-star-${star}`}
+											type='button'
+											onClick={() => setEvaluationRating(star)}
+											className={`h-7 w-7 rounded-full border text-sm transition ${star <= evaluationRating ? 'border-amber-300 bg-amber-100 text-amber-700' : 'border-slate-600 bg-slate-800 text-slate-300'}`}
+										>
+											★
+										</button>
+									))}
+								</div>
+								<textarea
+									rows={2}
+									value={evaluationComment}
+									onChange={(e) => setEvaluationComment(e.target.value)}
+									placeholder='Commentaire RH (optionnel)'
+									className='mt-2 w-full rounded border border-cyan-300/25 bg-slate-950 px-2 py-1 text-xs text-cyan-50 outline-none'
+								/>
+								<button
+									type='button'
+									onClick={handleSaveRecruiterEvaluation}
+									disabled={evaluationSaving}
+									className='mt-2 rounded border border-cyan-300/40 px-2 py-1 text-[11px] font-bold hover:bg-cyan-800/40 disabled:opacity-60'
+								>
+									{evaluationSaving ? 'Enregistrement...' : 'Enregistrer evaluation'}
+								</button>
+							</div>
 							{Array.isArray(reportData?.recommendations) && reportData.recommendations.length > 0 ? (
 								<ul className='mt-2 list-disc pl-5'>
 									{reportData.recommendations.slice(0, 3).map((rec, idx) => (

@@ -228,13 +228,18 @@ export function DashboardCandAnalyticsView({
 											<div key={cell.key} className='group relative'>
 												<div
 													title={hasEvents ? cell.title : ''}
-													className={`flex h-9 items-center justify-center rounded-md text-xs font-semibold ${hasEvents ? 'cursor-pointer border border-cyan-200 bg-cyan-100 text-[#0d355b]' : 'border border-slate-100 bg-white text-slate-500'}`}
+													className={`relative flex h-9 items-center justify-center rounded-md text-xs font-semibold ${hasEvents ? 'cursor-pointer border border-cyan-300 bg-cyan-100 text-[#0d355b]' : 'border border-slate-100 bg-white text-slate-500'}`}
 												>
 													{cell.day}
+													{hasEvents ? <span className='absolute bottom-1 h-1.5 w-1.5 rounded-full bg-cyan-700' /> : null}
 												</div>
 												{hasEvents ? (
-													<div className='pointer-events-none absolute left-1/2 top-full z-20 mt-1 w-max max-w-[210px] -translate-x-1/2 rounded-lg bg-[#0f2742] px-2 py-1 text-[10px] font-semibold text-white opacity-0 shadow-lg transition group-hover:opacity-100'>
-														{cell.title}
+													<div className='pointer-events-none absolute left-1/2 top-full z-20 mt-1 w-max max-w-[240px] -translate-x-1/2 rounded-lg bg-[#0f2742] px-2 py-1.5 text-[10px] font-semibold text-white opacity-0 shadow-lg transition group-hover:opacity-100'>
+														{cell.events.map((event, idx) => (
+															<div key={`${cell.key}-event-${idx}`} className='leading-4'>
+																{event.offerTitle}
+															</div>
+														))}
 													</div>
 												) : null}
 											</div>

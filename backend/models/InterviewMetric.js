@@ -20,6 +20,12 @@ const InterviewMetricSchema = new mongoose.Schema(
       max: 100,
       required: true,
     },
+    stressScore: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: null,
+    },
     sampledAt: {
       type: Date,
       default: Date.now,
