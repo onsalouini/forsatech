@@ -326,7 +326,7 @@ export default function ChatWidget() {
                   <div style={s.avatarWrap}>
                     <div style={s.avatar}>{conv.otherName.charAt(0).toUpperCase()}</div>
                     {conv.unreadCount > 0 && (
-                      <div style={s.unreadDot}>{conv.unreadCount}</div>
+                      <div style={s.unreadDot}>+{conv.unreadCount > 99 ? '99' : conv.unreadCount}</div>
                     )}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -467,7 +467,7 @@ export default function ChatWidget() {
         </button>
         {screen === 'closed' && totalUnread > 0 && (
           <div style={s.fabBadge}>
-            {totalUnread > 9 ? '9+' : totalUnread}
+            +{totalUnread > 99 ? '99' : totalUnread}
           </div>
         )}
       </div>

@@ -4810,9 +4810,17 @@ function convKey(role1, id1, role2, id2) {
   return [`${role1}:${id1}`, `${role2}:${id2}`].sort().join('__');
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 io.on('connection', (socket) => {
 
   socket.on('dm:join', ({ myRole, myId, otherRole, otherId }) => {
+    if (!myRole || !otherRole || myRole === otherRole) {
+      socket.emit('dm:error', { message: 'Conversation autorisee uniquement entre candidat et recruteur.' });
+      return;
+    }
     const key = convKey(myRole, myId, otherRole, otherId);
     socket.join(key);
     socket.data.key = key;
@@ -4820,6 +4828,11 @@ io.on('connection', (socket) => {
 
   socket.on('dm:send', async ({ myRole, myId, myName, otherRole, otherId, text }) => {
     try {
+      if (!myRole || !otherRole || myRole === otherRole) {
+        socket.emit('dm:error', { message: 'Conversation autorisee uniquement entre candidat et recruteur.' });
+        return;
+      }
+
       const key = convKey(myRole, myId, otherRole, otherId);
       const msg = await DirectMessage.create({
         conversationKey: key,
@@ -4860,32 +4873,52 @@ app.get('/api/dm/search', async (req, res) => {
     const regex = new RegExp(q, 'i');
     const nameFilter = { $or: [{ firstName: regex }, { lastName: regex }] };
 
-    // Search both collections in parallel
-    const [recruiters, candidates] = await Promise.all([
-      Recruiter.find(nameFilter).select('_id firstName lastName company').limit(8).lean(),
-      Candidate.find(nameFilter).select('_id firstName lastName professionalTitle').limit(8).lean(),
-    ]);
+    const results = [];
 
-    const results = [
-      ...recruiters
-        .filter((r) => !(excludeRole === 'recruiter' && String(r._id) === excludeId))
-        .map((r) => ({
+    if (excludeRole === 'candidate') {
+      const recruiters = await Recruiter.find(nameFilter).select('_id firstName lastName company').limit(8).lean();
+      results.push(
+        ...recruiters.map((r) => ({
+          id: String(r._id),
+          role: 'recruiter',
+          name: `${r.firstName} ${r.lastName}`,
+          subtitle: r.company || 'Recruteur',
+        }))
+      );
+    } else if (excludeRole === 'recruiter') {
+      const candidates = await Candidate.find(nameFilter).select('_id firstName lastName professionalTitle').limit(8).lean();
+      results.push(
+        ...candidates.map((c) => ({
+          id: String(c._id),
+          role: 'candidate',
+          name: `${c.firstName} ${c.lastName}`,
+          subtitle: c.professionalTitle || 'Candidat',
+        }))
+      );
+    } else {
+      const [recruiters, candidates] = await Promise.all([
+        Recruiter.find(nameFilter).select('_id firstName lastName company').limit(8).lean(),
+        Candidate.find(nameFilter).select('_id firstName lastName professionalTitle').limit(8).lean(),
+      ]);
+      results.push(
+        ...recruiters.map((r) => ({
           id: String(r._id),
           role: 'recruiter',
           name: `${r.firstName} ${r.lastName}`,
           subtitle: r.company || 'Recruteur',
         })),
-      ...candidates
-        .filter((c) => !(excludeRole === 'candidate' && String(c._id) === excludeId))
-        .map((c) => ({
+        ...candidates.map((c) => ({
           id: String(c._id),
           role: 'candidate',
           name: `${c.firstName} ${c.lastName}`,
           subtitle: c.professionalTitle || 'Candidat',
-        })),
-    ];
+        }))
+      );
+    }
 
-    return res.json({ success: true, results });
+    const filteredResults = results.filter((u) => !(u.role === excludeRole && u.id === excludeId));
+
+    return res.json({ success: true, results: filteredResults });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -4916,14 +4949,21 @@ app.get('/api/dm/conversations', async (req, res) => {
     if (!userId || !userRole) {
       return res.status(400).json({ success: false, message: 'userId et userRole sont requis.' });
     }
+    if (!mongoose.Types.ObjectId.isValid(String(userId))) {
+      return res.status(400).json({ success: false, message: 'userId invalide.' });
+    }
 
     const userKey = `${userRole}:${userId}`;
+    const userRoleNormalized = String(userRole).trim();
+    const userIdNormalized = String(userId).trim();
+    const userKeyRegex = new RegExp(`(^|__)${escapeRegExp(userKey)}(__|$)`);
+    const userObjectId = new mongoose.Types.ObjectId(userIdNormalized);
 
     // Find all distinct conversations this user is part of
     const conversations = await DirectMessage.aggregate([
       {
         $match: {
-          conversationKey: { $regex: userKey, $options: 'i' },
+          conversationKey: userKeyRegex,
         },
       },
       {
@@ -4938,7 +4978,7 @@ app.get('/api/dm/conversations', async (req, res) => {
               $cond: [
                 {
                   $and: [
-                    { $ne: ['$senderId', { $toObjectId: userId }] },
+                    { $ne: ['$senderId', userObjectId] },
                     { $eq: ['$readAt', null] },
                   ],
                 },
@@ -4954,13 +4994,19 @@ app.get('/api/dm/conversations', async (req, res) => {
 
     // Parse the other participant's identity from the conversationKey
     const results = conversations.map((conv) => {
-      const parts = conv._id.split('__');
-      const otherPart = parts.find((p) => !p.includes(userId));
-      const [otherRole, otherId] = (otherPart || '').split(':');
+      const parts = String(conv._id)
+        .split('__')
+        .map((p) => {
+          const idx = p.indexOf(':');
+          if (idx < 0) return null;
+          return { role: p.slice(0, idx), id: p.slice(idx + 1) };
+        })
+        .filter(Boolean);
+      const other = parts.find((p) => !(p.role === userRoleNormalized && p.id === userIdNormalized));
       return {
         conversationKey: conv._id,
-        otherRole: otherRole || '',
-        otherId: otherId || '',
+        otherRole: other?.role || '',
+        otherId: other?.id || '',
         lastMessage: {
           text: conv.lastMessage.text,
           senderName: conv.lastMessage.senderName,
@@ -5005,10 +5051,14 @@ app.patch('/api/dm/read', async (req, res) => {
     if (!conversationKey || !userId) {
       return res.status(400).json({ success: false, message: 'conversationKey et userId sont requis.' });
     }
+    if (!mongoose.Types.ObjectId.isValid(String(userId))) {
+      return res.status(400).json({ success: false, message: 'userId invalide.' });
+    }
+    const userObjectId = new mongoose.Types.ObjectId(String(userId));
     await DirectMessage.updateMany(
       {
         conversationKey,
-        senderId: { $ne: userId },
+        senderId: { $ne: userObjectId },
         readAt: null,
       },
       { $set: { readAt: new Date() } }
