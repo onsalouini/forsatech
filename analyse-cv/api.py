@@ -1,6 +1,8 @@
+from datetime import datetime, timezone
 import os
 import tempfile
 from pathlib import Path
+from typing import Any
 import spacy
 try:
     import spacy_transformers  # noqa: F401
@@ -9,6 +11,7 @@ except Exception:
     _HAS_SPACY_TRANSFORMERS = False
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
 from test_cv import clean_entity, read_file, rule_based_extras, translate_text_if_needed
 
@@ -23,6 +26,30 @@ app.add_middleware(
 
 _nlp = None
 _MODEL_DIR = (Path(__file__).resolve().parent / "model-best").as_posix()
+
+
+class ExtractionInput(BaseModel):
+    file_name: str
+    translate: bool = False
+    target_lang: str = "en"
+
+
+class ExtractionResults(BaseModel):
+    translation: dict[str, Any] = Field(default_factory=dict)
+    source_preview: str = ""
+    entities: dict[str, list[str]] = Field(default_factory=dict)
+    model_metrics: dict[str, Any] = Field(default_factory=dict)
+    total_entities: int = 0
+
+
+class ModelResponse(BaseModel):
+    success: bool = True
+    model: str = "cv-extractor-spacy-v1"
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    input: ExtractionInput
+    results: ExtractionResults
+    warnings: list[str] = Field(default_factory=list)
+    errors: Any | None = None
 
 
 def _patch_spacy_pydantic_schema():
@@ -68,7 +95,7 @@ def root():
     return {"message": "CV Extractor API — POST /extract pour extraire les entités"}
 
 
-@app.post("/extract")
+@app.post("/extract", response_model=ModelResponse)
 async def extract(
     file: UploadFile = File(...),
     translate: bool = Form(False),
@@ -119,13 +146,29 @@ async def extract(
         for e in unique:
             grouped.setdefault(e["label"], []).append(e["text"])
 
-        return {
-            "status": "ok",
-            "translation": translation_info,
-            "source_preview": source_text[:700],
-            "entities": grouped,
-            "model_metrics": get_model_metrics(nlp),
-        }
+        translation_payload = (
+            translation_info if isinstance(translation_info, dict) else {"raw": translation_info}
+        )
+
+        total_entities = sum(len(values) for values in grouped.values())
+
+        return ModelResponse(
+            success=True,
+            input=ExtractionInput(
+                file_name=file.filename or Path(tmp_path).name,
+                translate=translate,
+                target_lang=target_lang,
+            ),
+            results=ExtractionResults(
+                translation=translation_payload,
+                source_preview=source_text[:700],
+                entities=grouped,
+                model_metrics=get_model_metrics(nlp),
+                total_entities=total_entities,
+            ),
+            warnings=[],
+            errors=None,
+        )
 
     except HTTPException:
         raise

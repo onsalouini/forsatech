@@ -9,7 +9,7 @@
 
 Toutes les dépendances ont déjà été installées.
 
-## Démarrage en développement
+## Demarrage en developpement
 
 Depuis la racine `AIR` :
 
@@ -24,25 +24,67 @@ Cela lance :
 ## Commandes utiles
 
 ```bash
-pour active notre model il faut mettre cette commande 
-"Set-Location e:\AIR\analyse-cv; .\.venv\Scripts\python.exe -m uvicorn api:app --host 127.0.0.1 --port 8001"
 npm run dev:frontend
 npm run dev:backend
 npm run build
 npm start
 ```
 
+## Service Python analyse-cv
+
+Pour demarrer le service FastAPI sur `http://127.0.0.1:8001` :
+
+```powershell
+Set-Location e:\AIR\analyse-cv
+& ".\.venv\Scripts\python.exe" -m uvicorn api:app --host 127.0.0.1 --port 8001 --reload
+```
+
+## Format standard des resultats modele
+
+L'endpoint `POST /extract` renvoie maintenant une reponse structuree et stable :
+
+```json
+{
+	"success": true,
+	"model": "cv-extractor-spacy-v1",
+	"timestamp": "2026-04-22T10:30:00Z",
+	"input": {
+		"file_name": "cv_john_doe.pdf",
+		"translate": false,
+		"target_lang": "en"
+	},
+	"results": {
+		"translation": {
+			"applied": false,
+			"from": "fr",
+			"to": "en"
+		},
+		"source_preview": "...",
+		"entities": {
+			"skills": ["Python", "React"],
+			"email": ["john.doe@email.com"]
+		},
+		"model_metrics": {
+			"accuracy": 0.98,
+			"precision": 0.95,
+			"recall": 0.94,
+			"f1": 0.945
+		},
+		"total_entities": 12
+	},
+	"warnings": [],
+	"errors": null
+}
+```
+
 ## Endpoint de test API
 
 `GET http://localhost:5000/api/health`
 
-## Service Python analyse-cv
+## Git LFS
 
-Pour démarrer le service d'analyse CV (FastAPI) sur `http://127.0.0.1:8001` :
-
-```powershell
-& "e:\AIR\analyse-cv\.venv\Scripts\python.exe" -m uvicorn api:app --app-dir "e:\AIR\analyse-cv" --host 127.0.0.1 --port 8001 --reload
-```
+```bash
 git lfs install
 git pull origin main
 git lfs pull
+```

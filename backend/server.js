@@ -2323,8 +2323,15 @@ function extractCertificateMentionsFromText(text) {
 
 function buildStructuredCvExtraction(extractionPayload, options = {}) {
   const payload = extractionPayload && typeof extractionPayload === 'object' ? extractionPayload : {};
-  const entities = payload?.entities && typeof payload.entities === 'object' ? payload.entities : {};
-  const sourcePreview = String(payload?.source_preview || payload?.sourcePreview || '');
+  const normalized = payload?.results && typeof payload.results === 'object' ? payload.results : payload;
+  const entities = normalized?.entities && typeof normalized.entities === 'object' ? normalized.entities : {};
+  const sourcePreview = String(
+    normalized?.source_preview ||
+      normalized?.sourcePreview ||
+      payload?.source_preview ||
+      payload?.sourcePreview ||
+      ''
+  );
   const fallbackText = String(options?.fallbackText || '');
 
   const categories = {
@@ -2941,6 +2948,7 @@ app.get('/api/cv/extract/:candidateId', async (req, res) => {
       });
     }
 
+    const extractionPayload = data?.results && typeof data.results === 'object' ? data.results : data;
     const localCvText = await extractTextFromBuffer(fileBuffer, mimeType, fileName);
     const extractionToStore = buildStructuredCvExtraction(data, { fallbackText: localCvText });
     cv.extraction = extractionToStore;
@@ -2956,7 +2964,14 @@ app.get('/api/cv/extract/:candidateId', async (req, res) => {
         createdAt: cv.createdAt,
         updatedAt: cv.updatedAt,
       },
-      extraction: data,
+      extraction: extractionPayload,
+      extractionMeta: data?.results && typeof data.results === 'object'
+        ? {
+            model: String(data?.model || ''),
+            timestamp: data?.timestamp || null,
+            warnings: Array.isArray(data?.warnings) ? data.warnings : [],
+          }
+        : null,
       extractionSaved: true,
       storedCategories: extractionToStore.categories,
     });

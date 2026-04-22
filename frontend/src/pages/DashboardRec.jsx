@@ -1547,6 +1547,126 @@ function DashboardRec() {
 
 	const getExtractionLabel = (label) => extractionLabelMap[label] || String(label || '').replace(/_/g, ' ')
 
+	const normalizeExtractionText = (value) =>
+		String(value || '')
+			.toLowerCase()
+			.normalize('NFD')
+			.replace(/[\u0300-\u036f]/g, '')
+			.replace(/[_-]+/g, ' ')
+			.replace(/\s+/g, ' ')
+			.trim()
+
+	const toUniqueExtractionValues = (values) => {
+		const base = Array.isArray(values) ? values : [values]
+		return Array.from(
+			new Set(
+				base
+					.map((item) => String(item || '').trim())
+					.filter(Boolean)
+			)
+		)
+	}
+
+	const collectValuesByAliases = (source, aliases) => {
+		const normalizedAliases = (Array.isArray(aliases) ? aliases : [])
+			.map((alias) => normalizeExtractionText(alias))
+			.filter(Boolean)
+
+		const merged = []
+		for (const [rawLabel, rawValues] of Object.entries(source || {})) {
+			const normalizedLabel = normalizeExtractionText(rawLabel)
+			const isMatch = normalizedAliases.some((alias) => normalizedLabel === alias || normalizedLabel.includes(alias) || alias.includes(normalizedLabel))
+			if (!isMatch) continue
+			merged.push(...toUniqueExtractionValues(rawValues))
+		}
+
+		return toUniqueExtractionValues(merged)
+	}
+
+	const collectPatternMatches = (source, pattern) => {
+		if (!(pattern instanceof RegExp)) return []
+		const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`
+		const matcher = new RegExp(pattern.source, flags)
+		const collected = []
+
+		for (const rawValues of Object.values(source || {})) {
+			for (const value of toUniqueExtractionValues(rawValues)) {
+				const matches = String(value).match(matcher)
+				if (matches?.length) collected.push(...matches)
+			}
+		}
+
+		return toUniqueExtractionValues(collected)
+	}
+
+	const normalizeSocialUrl = (value) => {
+		const raw = String(value || '').trim().replace(/[),.;]+$/, '')
+		if (!raw) return ''
+		if (/^https?:\/\//i.test(raw)) return raw
+		if (/^(?:www\.)?linkedin\.com\//i.test(raw) || /^(?:www\.)?github\.com\//i.test(raw)) return `https://${raw}`
+		return raw
+	}
+
+	const extractFocusedCvEntries = (extractionSource) => {
+		const source = extractionSource && typeof extractionSource === 'object' ? extractionSource : {}
+		const emailPattern = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi
+		const phonePattern = /(?:\+?\d[\d\s().-]{7,}\d)/g
+		const linkedInPattern = /(?:https?:\/\/)?(?:www\.)?linkedin\.com\/[^\s<>"')]+/gi
+		const githubPattern = /(?:https?:\/\/)?(?:www\.)?github\.com\/[^\s<>"')]+/gi
+
+		const emails = toUniqueExtractionValues([
+			...collectValuesByAliases(source, ['email', 'mail']),
+			...collectPatternMatches(source, emailPattern),
+		])
+
+		const phones = toUniqueExtractionValues([
+			...collectValuesByAliases(source, ['phone', 'telephone', 'tel', 'mobile']),
+			...collectPatternMatches(source, phonePattern),
+		]).filter((value) => String(value).replace(/\D/g, '').length >= 8)
+
+		const locations = toUniqueExtractionValues(collectValuesByAliases(source, ['location', 'localisation', 'city', 'country', 'address', 'adresse']))
+
+		const linkedin = toUniqueExtractionValues([
+			...collectValuesByAliases(source, ['linkedin']),
+			...collectPatternMatches(source, linkedInPattern),
+		])
+			.map(normalizeSocialUrl)
+			.filter((value) => /linkedin\.com/i.test(value))
+
+		const github = toUniqueExtractionValues([
+			...collectValuesByAliases(source, ['github']),
+			...collectPatternMatches(source, githubPattern),
+		])
+			.map(normalizeSocialUrl)
+			.filter((value) => /github\.com/i.test(value))
+
+		const removeContactNoise = (value) => {
+			const raw = String(value || '').trim()
+			if (!raw) return false
+			if (/https?:\/\//i.test(raw)) return false
+			if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(raw)) return false
+			return true
+		}
+
+		const skills = toUniqueExtractionValues(
+			collectValuesByAliases(source, ['skills', 'skill', 'competences', 'competence', 'technologies', 'technical skills'])
+		).filter(removeContactNoise)
+
+		const certifications = toUniqueExtractionValues(
+			collectValuesByAliases(source, ['certifications', 'certification', 'certificate', 'certificat', 'certificats'])
+		).filter(removeContactNoise)
+
+		return [
+			['Email', emails],
+			['Telephone', phones],
+			['Localisation', locations],
+			['LinkedIn', linkedin],
+			['GitHub', github],
+			['Competences', skills],
+			['Certifications', certifications],
+		].filter(([, values]) => Array.isArray(values) && values.length > 0)
+	}
+
 	const normalizeOfferSectionTitle = (rawTitle) => {
 		const normalized = String(rawTitle || '')
 			.toLowerCase()
@@ -2162,39 +2282,15 @@ function DashboardRec() {
 																]
 																const extractionSource = extractionSources.reduce((acc, source) => {
 																	for (const [label, values] of Object.entries(source)) {
-																		const normalizedValues = Array.isArray(values) ? values : [values]
+																		const normalizedValues = toUniqueExtractionValues(values)
 																		if (!acc[label]) acc[label] = []
 																		acc[label].push(...normalizedValues)
-																		acc[label] = Array.from(new Set(acc[label].map((item) => String(item || '').trim()).filter(Boolean)))
+																		acc[label] = toUniqueExtractionValues(acc[label])
 																	}
 																	return acc
 																}, {})
-																const groupedExtractionEntries = Object.entries(extractionSource).reduce((acc, [label, values]) => {
-																	const displayLabel = getExtractionLabel(label)
-																	const groupKey = String(displayLabel || '').toLowerCase().trim()
-																	if (!groupKey) return acc
-
-																	const normalizedValues = Array.isArray(values) ? values : [values]
-																	if (!acc[groupKey]) {
-																		acc[groupKey] = { label: displayLabel, values: [] }
-																	}
-
-																	acc[groupKey].values.push(...normalizedValues)
-																	acc[groupKey].values = Array.from(
-																		new Set(acc[groupKey].values.map((item) => String(item || '').trim()).filter(Boolean))
-																	)
-																	return acc
-																}, {})
-																const extractionEntries = Object.values(groupedExtractionEntries)
-																	.map((entry) => [entry.label, entry.values])
-																	.filter(([, values]) => {
-																		if (!Array.isArray(values)) return Boolean(values)
-																		return values.length > 0
-																	})
-																const extractionValuesCount = extractionEntries.reduce((acc, [, values]) => {
-																	if (Array.isArray(values)) return acc + values.length
-																	return acc + 1
-																}, 0)
+																const extractionEntries = extractFocusedCvEntries(extractionSource)
+																const extractionValuesCount = extractionEntries.reduce((acc, [, values]) => acc + values.length, 0)
 																		const quizAttempt = candidacy?.quizAttemptId && typeof candidacy.quizAttemptId === 'object' ? candidacy.quizAttemptId : null
 																		const quizScore = Number.isFinite(quizAttempt?.scorePercent) ? quizAttempt.scorePercent : null
 														const fullName = `${cand.firstName || ''} ${cand.lastName || ''}`.trim() || 'Candidat'
@@ -2315,14 +2411,11 @@ function DashboardRec() {
 																								<p className='text-[12px] text-[#3e6282]'>Cree: <span className='font-semibold'>{cvInfo.createdAt ? new Date(cvInfo.createdAt).toLocaleDateString() : 'N/A'}</span></p>
 																								<p className='text-[12px] text-[#3e6282]'>Mise a jour: <span className='font-semibold'>{cvInfo.updatedAt ? new Date(cvInfo.updatedAt).toLocaleDateString() : 'N/A'}</span></p>
 																								<p className='text-[12px] text-[#3e6282]'>Source: <span className='font-semibold'>{cvInfo.source === 'generated' ? 'Generation' : 'Upload'}</span></p>
-																								{extraction?.translation ? (
-																									<p className='text-[12px] text-[#3e6282]'>Traduction: <span className='font-semibold'>{String(extraction.translation)}</span></p>
-																								) : null}
 																							</div>
 
 																							<div className='rounded-lg border border-[#d5e9f8] bg-white p-2.5'>
 																								<div className='mb-2 flex flex-wrap items-center justify-between gap-2'>
-																									<p className='text-[11px] font-bold uppercase tracking-wide text-[#5b7f9d]'>Extraction (modele)</p>
+																									<p className='text-[11px] font-bold uppercase tracking-wide text-[#5b7f9d]'>Extraction ciblee (modele)</p>
 																									{extractionEntries.length > 0 ? (
 																										<span className='rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700'>
 																											{extractionEntries.length} blocs • {extractionValuesCount} valeurs
@@ -2341,23 +2434,63 @@ function DashboardRec() {
 																								) : extractionEntries.length > 0 ? (
 																									<div className='space-y-2'>
 																										{extractionEntries.map(([label, values]) => {
-																											const normalizedValues = Array.from(
-																												new Set(
-																													(Array.isArray(values) ? values : [values])
-																														.map((item) => String(item || '').trim())
-																														.filter(Boolean)
-																												)
-																											)
+																											const normalizedValues = toUniqueExtractionValues(values)
+																											const normalizedLabel = normalizeExtractionText(label)
 																											return (
 																												<div key={label} className='rounded-md border border-[#e1edf7] bg-[#fbfdff] p-2'>
 																													<p className='mb-1 text-xs font-bold text-[#0e3e63]'>{getExtractionLabel(label)}</p>
 																													{normalizedValues.length > 0 ? (
 																														<div className='flex flex-wrap gap-1.5'>
-																															{normalizedValues.map((value) => (
-																																<span key={`${label}-${value}`} className='rounded-full border border-[#d5e8f7] bg-white px-2 py-0.5 text-[11px] font-medium text-[#325f82]'>
-																																	{value}
-																																</span>
-																															))}
+																															{normalizedValues.map((value) => {
+																																const cleanValue = String(value || '').trim()
+																																if (!cleanValue) return null
+
+																																if (normalizedLabel === 'email') {
+																																	return (
+																																		<a
+																																			key={`${label}-${cleanValue}`}
+																																			href={`mailto:${cleanValue}`}
+																																			className='rounded-full border border-[#d5e8f7] bg-white px-2 py-0.5 text-[11px] font-medium text-[#1d5f88] hover:bg-cyan-50'
+																																		>
+																																			{cleanValue}
+																																		</a>
+																																	)
+																																}
+
+																																if (normalizedLabel === 'telephone') {
+																																	const phoneHref = cleanValue.replace(/[^\d+]/g, '')
+																																	return (
+																																		<a
+																																			key={`${label}-${cleanValue}`}
+																																			href={phoneHref ? `tel:${phoneHref}` : undefined}
+																																			className='rounded-full border border-[#d5e8f7] bg-white px-2 py-0.5 text-[11px] font-medium text-[#1d5f88] hover:bg-cyan-50'
+																																		>
+																																			{cleanValue}
+																																		</a>
+																																	)
+																																}
+
+																																if (normalizedLabel === 'linkedin' || normalizedLabel === 'github') {
+																																	const href = normalizeSocialUrl(cleanValue)
+																																	return (
+																																		<a
+																																			key={`${label}-${cleanValue}`}
+																																			href={href}
+																																			target='_blank'
+																																			rel='noreferrer'
+																																			className='rounded-full border border-[#d5e8f7] bg-white px-2 py-0.5 text-[11px] font-medium text-[#1d5f88] hover:bg-cyan-50'
+																																		>
+																																			{cleanValue}
+																																		</a>
+																																	)
+																																}
+
+																																return (
+																																	<span key={`${label}-${cleanValue}`} className='rounded-full border border-[#d5e8f7] bg-white px-2 py-0.5 text-[11px] font-medium text-[#325f82]'>
+																																		{cleanValue}
+																																	</span>
+																																)
+																															})}
 																														</div>
 																													) : (
 																														<p className='text-xs text-[#6b89a3]'>Aucune valeur detectee.</p>
@@ -2368,7 +2501,7 @@ function DashboardRec() {
 																									</div>
 																								) : (
 																									<div className='rounded-md border border-dashed border-[#d6e8f7] bg-[#f8fcff] px-3 py-4 text-center text-xs text-[#5d7f9b]'>
-																										Clique sur Details CV pour lancer l analyse.
+																										Aucune information essentielle detectee pour ce CV.
 																									</div>
 																								)}
 																							</div>
