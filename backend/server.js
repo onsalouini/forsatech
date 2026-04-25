@@ -28,16 +28,24 @@ const AppFeedback = require('./models/AppFeedback');
 const Chat = require('./models/Chat');
 const CandidateSession = require('./models/CandidateSession');
 const QuizAttempt = require('./models/QuizAttempt');
+const ScoreMatchOffre = require('./models/ScoreMatchOffre');
 
 const DirectMessage = require('./models/DirectMessage'); 
 
-//#dotenv.config();
-//#require('dotenv').config()
-
-
 const app = express();
 const PORT = process.env.PORT || 5000;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/AIR';
+const envCandidates = [
+  path.resolve(__dirname, '.env'),
+  path.resolve(__dirname, '..', '.env'),
+];
+const envPath = envCandidates.find((candidate) => fs.existsSync(candidate));
+if (envPath) {
+  dotenv.config({ path: envPath });
+} else {
+  dotenv.config();
+}
+
+const MONGODB_URI = process.env.MONGODB_URI;
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // added limit for large uploads if any
@@ -863,6 +871,9 @@ function buildCvHtml(personal, content) {
 
 const connectDB = async () => {
   try {
+    if (!MONGODB_URI) {
+      throw new Error('MONGODB_URI is missing. Add it to backend/.env or project root .env');
+    }
     await mongoose.connect(MONGODB_URI);
     console.log('MongoDB connected');
     return true;
@@ -3755,6 +3766,38 @@ app.get('/api/offers/match/:candidateId', async (req, res) => {
         if (semanticDiff !== 0) return semanticDiff;
         return String(a?.offerId || '').localeCompare(String(b?.offerId || ''));
       });
+
+    // Persist latest score per candidate/offer in MongoDB collection `score-MatchOffre`.
+    if (matches.length > 0) {
+      const now = new Date();
+      const writes = matches.map((m) => ({
+        updateOne: {
+          filter: {
+            candidateId,
+            jobOfferId: m.offerId,
+          },
+          update: {
+            $set: {
+              cvId: cv?._id || null,
+              score: Number.isFinite(m?.score) ? m.score : 0,
+              keywordScore: Number.isFinite(m?.keywordScore) ? m.keywordScore : null,
+              semanticScore: Number.isFinite(m?.semanticScore) ? m.semanticScore : null,
+              keywords: Array.isArray(m?.keywords) ? m.keywords : [],
+              matchedKeywords: Array.isArray(m?.matchedKeywords) ? m.matchedKeywords : [],
+              missingKeywords: Array.isArray(m?.missingKeywords) ? m.missingKeywords : [],
+              computedAt: now,
+            },
+            $setOnInsert: {
+              candidateId,
+              jobOfferId: m.offerId,
+            },
+          },
+          upsert: true,
+        },
+      }));
+
+      await ScoreMatchOffre.bulkWrite(writes, { ordered: false });
+    }
 
     return res.status(200).json({ success: true, matches });
   } catch (error) {

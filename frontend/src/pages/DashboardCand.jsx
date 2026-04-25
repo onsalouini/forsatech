@@ -16,6 +16,7 @@ import {
 	DashboardCandOfferHelpView,
 	DashboardCandAssistantView,
 	DashboardCandCandidaturesView,
+	DashboardCandInterviewsView,
 	DashboardCandQuizModal,
 } from './dashboardCand/index'
 
@@ -63,6 +64,10 @@ function DashboardCand() {
 	const [currentTime, setCurrentTime] = useState(new Date())
 	const [jobs, setJobs] = useState([])
 	const [candidacies, setCandidacies] = useState([])
+	const [candidateInterviews, setCandidateInterviews] = useState([])
+	const [candidateInterviewReports, setCandidateInterviewReports] = useState([])
+	const [candidateInterviewsLoading, setCandidateInterviewsLoading] = useState(false)
+	const [candidateInterviewsError, setCandidateInterviewsError] = useState('')
 	const [loading, setLoading] = useState(true)
 	const [loadError, setLoadError] = useState('')
 	const [cvMatchLoading, setCvMatchLoading] = useState(false)
@@ -452,6 +457,7 @@ function DashboardCand() {
 					{ key: 'offerHelp', label: 'Aide pour une offre' },
 					{ key: 'offres', label: "Offres d'emploi", count: jobs.length },
 					{ key: 'candidatures', label: 'Mes candidatures', count: candidacies.length },
+					{ key: 'entretiens', label: 'Entretiens', count: candidateInterviews.length || Number(dashboardStats?.offers?.interviewsCount) || 0 },
 				],
 			},
 			{
@@ -467,8 +473,35 @@ function DashboardCand() {
 				],
 			},
 		],
-		[jobs.length, candidacies.length, notificationsUnreadCount]
+		[jobs.length, candidacies.length, candidateInterviews.length, dashboardStats, notificationsUnreadCount]
 	)
+
+	const loadCandidateInterviews = async (currentCandidateId) => {
+		if (!currentCandidateId) return
+		setCandidateInterviewsLoading(true)
+		setCandidateInterviewsError('')
+		try {
+			const interviewsRes = await fetch(`${API_BASE}/interviews/candidate/${currentCandidateId}?limit=120`)
+			const interviewsData = await interviewsRes.json().catch(() => ({}))
+
+			if (!interviewsRes.ok || !interviewsData?.success) {
+				throw new Error(interviewsData?.message || 'Impossible de charger vos entretiens.')
+			}
+
+			setCandidateInterviews(Array.isArray(interviewsData?.interviews) ? interviewsData.interviews : [])
+
+			// Reports are fetched in background — not displayed but kept in state for internal use
+			fetch(`${API_BASE}/interviews/candidate/${currentCandidateId}/reports`)
+				.then((r) => r.json().catch(() => ({})))
+				.then((d) => { if (d?.success) setCandidateInterviewReports(Array.isArray(d?.reports) ? d.reports : []) })
+				.catch(() => {})
+		} catch (error) {
+			setCandidateInterviewsError(String(error?.message || 'Erreur serveur.'))
+			setCandidateInterviews([])
+		} finally {
+			setCandidateInterviewsLoading(false)
+		}
+	}
 
 	useEffect(() => {
 		const stored = localStorage.getItem('airCandidate')
@@ -670,6 +703,14 @@ function DashboardCand() {
 		return () => {
 			cancelled = true
 		}
+	}, [candidate, selectedView])
+
+	useEffect(() => {
+		const currentCandidateId = candidate?.id || candidate?._id
+		if (!currentCandidateId) return
+		if (selectedView !== 'entretiens') return
+
+		loadCandidateInterviews(currentCandidateId)
 	}, [candidate, selectedView])
 
 	const formatHoursList = (items) => {
@@ -1558,6 +1599,13 @@ function DashboardCand() {
 								>
 									Mes candidatures
 								</button>
+								<button
+									type='button'
+									onClick={() => setSelectedView('entretiens')}
+									className='candidate-dashboard__ghost-btn rounded-xl border border-cyan-300 bg-cyan-50 px-4 py-2 text-sm font-semibold text-[#0a5f88] transition hover:bg-cyan-100'
+								>
+									Mes entretiens
+								</button>
 							</div>
 						</div>
 
@@ -1744,6 +1792,19 @@ function DashboardCand() {
 							/>
 						) : selectedView === 'candidatures' ? (
 							<DashboardCandCandidaturesView candidacies={candidacies} />
+						) : selectedView === 'entretiens' ? (
+							<DashboardCandInterviewsView
+								interviews={candidateInterviews}
+								reports={candidateInterviewReports}
+								loading={candidateInterviewsLoading}
+								error={candidateInterviewsError}
+								onRefresh={() => {
+									const currentCandidateId = candidate?.id || candidate?._id
+									if (!currentCandidateId) return
+									loadCandidateInterviews(currentCandidateId)
+								}}
+								handleJoinInterviewMeet={handleJoinInterviewMeet}
+							/>
 						) : (
 							<div className='mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-5'>
 								<p className='text-lg font-bold text-[#0d355b]'>Section bientôt disponible</p>
