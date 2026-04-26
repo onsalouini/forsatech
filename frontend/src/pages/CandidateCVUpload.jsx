@@ -155,13 +155,15 @@ function CandidateCVUpload() {
 					</div>
 
 					<div className='p-6 sm:p-10 bg-[#fdfdfd]'>
-							<button
-								type='button'
+							<div
+								role='button'
+								tabIndex={0}
 								aria-label='Zone de dépôt du CV'
 								className={`rounded-2xl border-2 border-dashed bg-white p-8 text-center transition-colors ${
 									dragActive ? 'border-cyan-600 bg-cyan-50/40' : 'border-[#0a7da4]/40'
 								}`}
 								onClick={() => fileInputRef.current?.click()}
+								onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click() }}
 								onDragEnter={(e) => {
 									e.preventDefault()
 									e.stopPropagation()
@@ -211,18 +213,18 @@ function CandidateCVUpload() {
 								)}
 
 								{previewBlock}
+							</div>
 
-								<div className='mt-6 flex items-center justify-center'>
-									<button
-										type='button'
-										onClick={uploadToBackend}
-										disabled={uploading}
-										className={uploadButtonClassName}
-									>
-										{uploading ? 'Envoi…' : 'Envoyer et sauvegarder'}
-									</button>
-								</div>
-							</button>
+							<div className='mt-6 flex items-center justify-center'>
+								<button
+									type='button'
+									onClick={uploadToBackend}
+									disabled={uploading}
+									className={uploadButtonClassName}
+								>
+									{uploading ? 'Envoi…' : 'Envoyer et sauvegarder'}
+								</button>
+							</div>
 							<input ref={fileInputRef} type='file' className='hidden' onChange={(e) => validateAndSetFile(e.target.files?.[0] || null)} />
 					</div>
 				</div>

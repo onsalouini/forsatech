@@ -1,7 +1,30 @@
 /* eslint-disable react/prop-types */
-import React from 'react'
+import React, { useState } from 'react'
 
-export function DashboardCandCandidaturesView({ candidacies }) {
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+
+export function DashboardCandCandidaturesView({ candidacies, onCandidacyDeleted }) {
+	const [deletingId, setDeletingId] = useState(null)
+	const [deleteError, setDeleteError] = useState('')
+
+	const handleDelete = async (candidacyId) => {
+		if (!window.confirm('Retirer cette candidature ? Cette action est irréversible.')) return
+		setDeletingId(candidacyId)
+		setDeleteError('')
+		try {
+			const res = await fetch(`${API_BASE}/candidacies/${candidacyId}`, { method: 'DELETE' })
+			const data = await res.json().catch(() => ({}))
+			if (res.ok && data.success) {
+				if (typeof onCandidacyDeleted === 'function') onCandidacyDeleted(candidacyId)
+			} else {
+				setDeleteError(data.message || 'Erreur lors de la suppression.')
+			}
+		} catch {
+			setDeleteError('Erreur réseau.')
+		} finally {
+			setDeletingId(null)
+		}
+	}
 
 	return (
 		<div className='mt-8 rounded-2xl border border-[#9fc3e1] bg-gradient-to-br from-[#f7fbff] via-[#edf6ff] to-[#deedfb] p-5 ring-1 ring-[#bdd8ef] shadow-[0_14px_34px_rgba(8,51,93,0.13)]'>
@@ -14,6 +37,10 @@ export function DashboardCandCandidaturesView({ candidacies }) {
 				</div>
 				<p className='mt-1 text-sm font-semibold text-cyan-100/90'>Suivi centralisé de vos candidatures et statuts.</p>
 			</div>
+
+			{deleteError ? (
+				<div className='mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700'>{deleteError}</div>
+			) : null}
 
 			{candidacies.length === 0 ? (
 				<div className='mt-4 rounded-2xl border border-slate-200 bg-white p-5'>
@@ -51,6 +78,16 @@ export function DashboardCandCandidaturesView({ candidacies }) {
 									{Number.isFinite(c?.quizScore) ? (
 										<p className='mt-2 text-sm text-slate-600'>Score quiz: {c.quizScore}%</p>
 									) : null}
+									<div className='mt-3 flex justify-end'>
+										<button
+											type='button'
+											onClick={() => handleDelete(c._id)}
+											disabled={deletingId === c._id}
+											className='rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-50'
+										>
+											{deletingId === c._id ? 'Suppression...' : 'Retirer la candidature'}
+										</button>
+									</div>
 								</div>
 							</div>
 						)

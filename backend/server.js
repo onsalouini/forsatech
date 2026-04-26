@@ -24,6 +24,10 @@ const AppFeedback = require('./models/AppFeedback');
 const Chat = require('./models/Chat');
 const CandidateSession = require('./models/CandidateSession');
 const QuizAttempt = require('./models/QuizAttempt');
+const ScoreMatchOffre = require('./models/ScoreMatchOffre');
+const CertifRef = require('./models/CertifRef');
+const EducationRef = require('./models/EducationRef');
+const CandidacyScore = require('./models/CandidacyScore');
 
 const DirectMessage = require('./models/DirectMessage'); 
 
@@ -2139,6 +2143,9 @@ app.post('/api/cv/generated', async (req, res) => {
       message: 'CV généré et enregistré avec succès.',
       cv: created,
     });
+
+    // Fire-and-forget extraction côté candidat
+    triggerCvExtractionAsync(created).catch(() => {});
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -2151,6 +2158,44 @@ app.post('/api/cv/generated', async (req, res) => {
 function resolveUploadPublicPathToAbsPath(publicPath) {
   const rel = String(publicPath || '').replace(/^\/+/, '');
   return path.join(__dirname, rel);
+}
+
+async function triggerCvExtractionAsync(cv) {
+  try {
+    const publicPath = String(cv?.uploadedFile?.path || '').trim();
+    if (!publicPath || !publicPath.startsWith('/uploads/cv/')) return;
+    const absPath = resolveUploadPublicPathToAbsPath(publicPath);
+    if (!fs.existsSync(absPath)) return;
+
+    const analyzerBaseUrl = (process.env.CV_ANALYZER_URL || 'http://127.0.0.1:8001').toString().replace(/\/+$/, '');
+    const timeoutMs = readIntEnv('CV_ANALYZER_TIMEOUT_MS', 90000, { min: 5000, max: 300000 });
+
+    const fileBuffer = await fs.promises.readFile(absPath);
+    const fileName = String(cv?.uploadedFile?.originalName || cv?.uploadedFile?.fileName || 'cv');
+    const mimeType = String(cv?.uploadedFile?.mimeType || 'application/octet-stream');
+
+    const form = new FormData();
+    form.append('file', new Blob([fileBuffer], { type: mimeType }), fileName);
+    form.append('translate', 'false');
+    form.append('target_lang', 'en');
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    const resp = await fetch(`${analyzerBaseUrl}/extract`, {
+      method: 'POST',
+      body: form,
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeout));
+
+    if (!resp.ok) return;
+    const data = await resp.json().catch(() => ({}));
+    const localCvText = await extractTextFromBuffer(fileBuffer, mimeType, fileName);
+    const extractionToStore = buildStructuredCvExtraction(data, { fallbackText: localCvText });
+    await CV.findByIdAndUpdate(cv._id, { $set: { extraction: extractionToStore } });
+  } catch {
+    // Silent fail — extraction is best-effort
+  }
 }
 
 async function findActiveOrLatestCv(candidateId, { lean = false } = {}) {
@@ -2744,6 +2789,9 @@ app.post('/api/cv/upload', (req, res) => {
         },
       });
 
+      // Fire-and-forget extraction côté candidat
+      triggerCvExtractionAsync(created).catch(() => {});
+
       return res.status(200).json({
         success: true,
         message: 'CV uploadé et enregistré avec succès.',
@@ -2875,6 +2923,60 @@ app.get('/api/cv/by-id/:cvId', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Erreur serveur pendant la récupération du CV.',
+      error: error.message,
+    });
+  }
+});
+
+app.get('/api/cv/extraction-by-candidate/:candidateId', async (req, res) => {
+  try {
+    const { candidateId } = req.params;
+    if (!candidateId || !mongoose.Types.ObjectId.isValid(String(candidateId))) {
+      return res.status(400).json({ success: false, message: 'candidateId invalide.' });
+    }
+    const cv = await CV.findOne({ candidateId }).sort({ isActive: -1, createdAt: -1 })
+      .select('_id extraction source uploadedFile personal createdAt updatedAt isActive')
+      .lean();
+    if (!cv) {
+      return res.status(404).json({ success: false, message: 'CV introuvable.' });
+    }
+    return res.status(200).json({
+      success: true,
+      candidateId: String(candidateId),
+      cvId: String(cv._id),
+      source: cv.source || '',
+      fileName: cv?.uploadedFile?.originalName || cv?.uploadedFile?.fileName || '',
+      updatedAt: cv.updatedAt || null,
+      extraction: cv.extraction || null,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur.',
+      error: error.message,
+    });
+  }
+});
+
+app.get('/api/cv/extraction-data/:cvId', async (req, res) => {
+  try {
+    const { cvId } = req.params;
+    if (!cvId || !mongoose.Types.ObjectId.isValid(String(cvId))) {
+      return res.status(400).json({ success: false, message: 'cvId invalide.' });
+    }
+    const cv = await CV.findById(cvId).select('extraction source uploadedFile personal createdAt updatedAt isActive').lean();
+    if (!cv) {
+      return res.status(404).json({ success: false, message: 'CV introuvable.' });
+    }
+    return res.status(200).json({
+      success: true,
+      cvId: String(cvId),
+      extraction: cv.extraction || null,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur.',
       error: error.message,
     });
   }
@@ -3750,6 +3852,38 @@ app.get('/api/offers/match/:candidateId', async (req, res) => {
         return String(a?.offerId || '').localeCompare(String(b?.offerId || ''));
       });
 
+    // Persist latest score per candidate/offer in MongoDB collection `score-MatchOffre`.
+    if (matches.length > 0) {
+      const now = new Date();
+      const writes = matches.map((m) => ({
+        updateOne: {
+          filter: {
+            candidateId,
+            jobOfferId: m.offerId,
+          },
+          update: {
+            $set: {
+              cvId: cv?._id || null,
+              score: Number.isFinite(m?.score) ? m.score : 0,
+              keywordScore: Number.isFinite(m?.keywordScore) ? m.keywordScore : null,
+              semanticScore: Number.isFinite(m?.semanticScore) ? m.semanticScore : null,
+              keywords: Array.isArray(m?.keywords) ? m.keywords : [],
+              matchedKeywords: Array.isArray(m?.matchedKeywords) ? m.matchedKeywords : [],
+              missingKeywords: Array.isArray(m?.missingKeywords) ? m.missingKeywords : [],
+              computedAt: now,
+            },
+            $setOnInsert: {
+              candidateId,
+              jobOfferId: m.offerId,
+            },
+          },
+          upsert: true,
+        },
+      }));
+
+      await ScoreMatchOffre.bulkWrite(writes, { ordered: false });
+    }
+
     return res.status(200).json({ success: true, matches });
   } catch (error) {
     return res.status(500).json({
@@ -3983,6 +4117,24 @@ app.get('/api/candidacies/:candidateId', async (req, res) => {
   }
 });
 
+app.delete('/api/candidacies/:candidacyId', async (req, res) => {
+  try {
+    const { candidacyId } = req.params;
+    if (!candidacyId || !mongoose.Types.ObjectId.isValid(String(candidacyId))) {
+      return res.status(400).json({ success: false, message: 'candidacyId invalide.' });
+    }
+    const deleted = await Candidacy.findByIdAndDelete(candidacyId);
+    if (!deleted) {
+      return res.status(404).json({ success: false, message: 'Candidature introuvable.' });
+    }
+    // Nettoyer les scores associés
+    await CandidacyScore.deleteOne({ candidacyId });
+    return res.status(200).json({ success: true, message: 'Candidature supprimée.' });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur.', error: error.message });
+  }
+});
+
 app.get('/api/candidacies/recruiter/:recruiterId', async (req, res) => {
   try {
     const { recruiterId } = req.params;
@@ -4020,6 +4172,84 @@ app.get('/api/candidacies/recruiter/:recruiterId', async (req, res) => {
       message: 'Erreur serveur pendant la recuperation des candidatures recruteur.',
       error: error.message,
     });
+  }
+});
+
+// ─── Endpoint scoring global pour candidatures d'une offre ─────────────────
+app.get('/api/candidacies/scores/:jobOfferId', async (req, res) => {
+  try {
+    const { jobOfferId } = req.params;
+    if (!jobOfferId || !mongoose.Types.ObjectId.isValid(String(jobOfferId))) {
+      return res.status(400).json({ success: false, message: 'jobOfferId invalide.' });
+    }
+
+    const offer = await JobOffer.findById(jobOfferId).lean();
+    if (!offer) return res.status(404).json({ success: false, message: 'Offre introuvable.' });
+
+    const [certifRefs, educationRefs, candidacies] = await Promise.all([
+      CertifRef.find().lean(),
+      EducationRef.find().sort({ rank: -1 }).lean(),
+      Candidacy.find({ jobOfferId })
+        .populate('candidateId', 'firstName lastName email country city professionalTitle sector experienceLevel')
+        .populate('quizAttemptId', 'scorePercent correctAnswers totalQuestions')
+        .lean(),
+    ]);
+
+    const scores = await Promise.all(
+      candidacies.map(async (candidacy) => {
+        const candidate = candidacy.candidateId && typeof candidacy.candidateId === 'object' ? candidacy.candidateId : {};
+        const candidateId = String(candidate._id || candidacy.candidateId || '');
+        const quizScorePercent = candidacy.quizAttemptId?.scorePercent ?? candidacy.quizScore ?? null;
+
+        const cvDoc = await CV.findOne({ candidateId }).sort({ isActive: -1, createdAt: -1 }).select('extraction').lean();
+        const cvExtraction = cvDoc?.extraction || null;
+
+        const result = await computeCandidacyScore({
+          candidacy,
+          offer,
+          candidate,
+          cvExtraction,
+          quizScorePercent,
+          certifRefs,
+          educationRefs,
+        });
+
+        // Sauvegarder en BD
+        await CandidacyScore.findOneAndUpdate(
+          { candidacyId: candidacy._id },
+          {
+            $set: {
+              candidateId,
+              jobOfferId,
+              ...result,
+              computedAt: new Date(),
+            },
+          },
+          { upsert: true, new: true }
+        );
+
+        return {
+          candidacyId: String(candidacy._id),
+          candidateId,
+          candidate: {
+            firstName: candidate.firstName || '',
+            lastName: candidate.lastName || '',
+            email: candidate.email || '',
+            professionalTitle: candidate.professionalTitle || '',
+            experienceLevel: candidate.experienceLevel || '',
+          },
+          quizAttempt: candidacy.quizAttemptId || null,
+          ...result,
+        };
+      })
+    );
+
+    // Trier par score final décroissant
+    scores.sort((a, b) => b.finalScore - a.finalScore);
+
+    return res.status(200).json({ success: true, jobOfferId, scores });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur scoring.', error: error.message });
   }
 });
 
@@ -5103,11 +5333,365 @@ app.patch('/api/dm/read', async (req, res) => {
   }
 });
 
+// ─── Seed référentiels certifications & éducation ───────────────────────────
+
+const CERTIF_SEED = [
+  { name: 'AWS Certified', keywords: ['aws', 'amazon web services', 'aws certified', 'cloud practitioner', 'solutions architect', 'aws developer'], weight: 10, category: 'Cloud' },
+  { name: 'Microsoft Azure', keywords: ['azure', 'microsoft azure', 'az-900', 'az-104', 'azure fundamentals', 'azure administrator'], weight: 10, category: 'Cloud' },
+  { name: 'Google Cloud (GCP)', keywords: ['gcp', 'google cloud', 'google cloud platform', 'associate cloud engineer', 'professional cloud architect'], weight: 10, category: 'Cloud' },
+  { name: 'CEH - Certified Ethical Hacker', keywords: ['ceh', 'certified ethical hacker', 'ethical hacker'], weight: 9, category: 'Cybersécurité' },
+  { name: 'CISSP', keywords: ['cissp', 'certified information systems security professional'], weight: 9, category: 'Cybersécurité' },
+  { name: 'Oracle Java Certified', keywords: ['oracle java', 'ocpjp', 'ocajp', 'oracle certified java', 'java se certified', 'oracle certified professional java'], weight: 8, category: 'Développement' },
+  { name: 'IBM Data Science', keywords: ['ibm data science', 'ibm professional certificate', 'ibm certified'], weight: 7, category: 'Data Science' },
+  { name: 'Meta Developer', keywords: ['meta developer', 'meta professional certificate', 'meta certified', 'facebook developer'], weight: 6, category: 'Développement' },
+  { name: 'CompTIA Security+', keywords: ['comptia security+', 'comptia security plus', 'security+'], weight: 6, category: 'Cybersécurité' },
+  { name: 'CompTIA A+', keywords: ['comptia a+', 'comptia a plus'], weight: 4, category: 'IT' },
+  { name: 'CompTIA Network+', keywords: ['comptia network+', 'network+'], weight: 5, category: 'Réseau' },
+  { name: 'CCNA - Cisco', keywords: ['ccna', 'cisco certified network associate', 'cisco ccna'], weight: 7, category: 'Réseau' },
+  { name: 'CCNP - Cisco', keywords: ['ccnp', 'cisco certified network professional'], weight: 8, category: 'Réseau' },
+  { name: 'PMP - Project Management', keywords: ['pmp', 'project management professional', 'pmi pmp'], weight: 8, category: 'Management' },
+  { name: 'Scrum Master (CSM)', keywords: ['scrum master', 'csm', 'certified scrum master', 'scrum alliance'], weight: 6, category: 'Agile' },
+  { name: 'TensorFlow Developer', keywords: ['tensorflow developer certificate', 'tensorflow certified'], weight: 7, category: 'IA/ML' },
+  { name: 'Coursera Professional Certificate', keywords: ['coursera certificate', 'coursera professional', 'coursera'], weight: 3, category: 'MOOC' },
+  { name: 'Microsoft Certified (MCP/MCSE)', keywords: ['mcse', 'mcp', 'microsoft certified', 'microsoft 365 certified'], weight: 7, category: 'Microsoft' },
+  { name: 'Red Hat (RHCE/RHCSA)', keywords: ['rhce', 'rhcsa', 'red hat certified'], weight: 8, category: 'Linux' },
+  { name: 'Kubernetes (CKA/CKAD)', keywords: ['cka', 'ckad', 'certified kubernetes', 'kubernetes administrator'], weight: 8, category: 'DevOps' },
+];
+
+const EDUCATION_SEED = [
+  { level: 'Doctorat', keywords: ['doctorat', 'phd', 'ph.d', 'doctor of philosophy', 'docteur'], score: 100, rank: 6 },
+  { level: 'Master', keywords: ['master', 'mastère', 'msc', 'm.sc', 'master of science', 'master 2', 'm2', 'diplôme national de master', 'master professionnel'], score: 85, rank: 5 },
+  { level: 'Ingéniorat', keywords: ['ingénieur', 'ingéniorat', 'cycle ingénieur', 'diplôme ingénieur', 'engineer degree', 'engineering degree', 'esprim', 'esprit', 'insat', 'enit', 'esen', 'isim', 'isi'], score: 85, rank: 5 },
+  { level: 'Licence', keywords: ['licence', 'bachelor', 'b.sc', 'bsc', 'license', 'licencié', 'licence fondamentale', 'licence appliquée'], score: 70, rank: 3 },
+  { level: 'BTS / DUT', keywords: ['bts', 'dut', 'brevet de technicien supérieur', 'diplôme universitaire de technologie'], score: 60, rank: 2 },
+  { level: 'Baccalauréat', keywords: ['baccalauréat', 'bac', 'lycée', 'terminale'], score: 50, rank: 1 },
+  { level: 'Autre', keywords: [], score: 50, rank: 0 },
+];
+
+async function seedReferentials() {
+  try {
+    for (const c of CERTIF_SEED) {
+      await CertifRef.updateOne(
+        { name: c.name },
+        { $setOnInsert: c },
+        { upsert: true }
+      );
+    }
+    for (const e of EDUCATION_SEED) {
+      await EducationRef.updateOne(
+        { level: e.level },
+        { $setOnInsert: e },
+        { upsert: true }
+      );
+    }
+  } catch {
+    // Non-bloquant
+  }
+}
+
+// ─── Moteur de scoring candidature ──────────────────────────────────────────
+
+// Poids de base
+const SCORE_WEIGHTS = {
+  matchCv: 0.30,
+  quiz: 0.10,
+  skills: 0.20,
+  experience: 0.15,
+  certif: 0.12,
+  education: 0.07,
+  location: 0.06,
+};
+
+// Mots vides FR + EN pour filtrer les tokens non significatifs
+const STOPWORDS = new Set([
+  'de','le','la','les','et','ou','un','une','des','pour','dans','avec','sur','par','que','qui',
+  'au','du','en','se','ce','est','son','sa','ses','leur','leurs','nous','vous','ils','elles',
+  'notre','votre','vos','mon','ton','mes','tes','être','avoir','faire','plus','très','bien',
+  'the','a','an','and','or','for','in','of','to','with','at','by','on','as','is','are','was',
+  'be','been','have','has','had','do','does','did','will','would','could','should','may','might',
+  'this','that','these','those','its','but','if','then','than','when','where','how','what',
+  'which','who','all','any','some','not','so','just','both','each','few','more','other','such',
+]);
+
+function normalizeStr(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+}
+
+// Extrait les tokens pondérés d'une offre (skills field compte double)
+function extractOfferSkillTokens(offer) {
+  const skillsNorm = normalizeStr(offer.technicalSkills || '');
+  const descNorm = normalizeStr(offer.description || '');
+  const titleNorm = normalizeStr(offer.title || '');
+
+  const tokenize = (text) =>
+    text.split(/[\s,;/|.()\[\]"'+\-]+/).map((t) => t.trim()).filter((t) => t.length >= 3 && !STOPWORDS.has(t));
+
+  const freq = {};
+  for (const t of tokenize(titleNorm)) freq[t] = (freq[t] || 0) + 1;
+  for (const t of tokenize(skillsNorm)) freq[t] = (freq[t] || 0) + 3; // poids x3 pour le champ skills
+  for (const t of tokenize(descNorm)) freq[t] = (freq[t] || 0) + 1;
+
+  return Object.entries(freq)
+    .filter(([, f]) => f >= 1)
+    .sort((a, b) => b[1] - a[1])
+    .map(([token, freq]) => ({ token, freq }))
+    .slice(0, 40);
+}
+
+function detectEducationScore(cvExtractionCategories, educationRefs) {
+  const eduItems = [
+    ...(Array.isArray(cvExtractionCategories?.education) ? cvExtractionCategories.education : []),
+    ...(Array.isArray(cvExtractionCategories?.titles) ? cvExtractionCategories.titles : []),
+    ...(Array.isArray(cvExtractionCategories?.summary) ? cvExtractionCategories.summary : []),
+  ].map(normalizeStr).filter(Boolean);
+
+  if (eduItems.length === 0) return { score: 50, level: 'Non détecté' };
+
+  const text = eduItems.join(' ');
+  let bestScore = 50;
+  let bestLevel = 'Autre';
+  let bestRank = -1;
+
+  for (const ref of educationRefs) {
+    const keywords = Array.isArray(ref.keywords) ? ref.keywords.map(normalizeStr).filter(Boolean) : [];
+    if (keywords.some((kw) => kw && text.includes(kw))) {
+      if (ref.rank > bestRank) {
+        bestRank = ref.rank;
+        bestScore = ref.score;
+        bestLevel = ref.level;
+      }
+    }
+  }
+  return { score: bestScore, level: bestLevel };
+}
+
+function detectCertifScore(cvExtractionCategories, certifRefs) {
+  const certifItems = [
+    ...(Array.isArray(cvExtractionCategories?.certifications) ? cvExtractionCategories.certifications : []),
+    ...(Array.isArray(cvExtractionCategories?.skills) ? cvExtractionCategories.skills : []),
+    ...(Array.isArray(cvExtractionCategories?.summary) ? cvExtractionCategories.summary : []),
+  ].map(normalizeStr).filter(Boolean);
+
+  if (certifItems.length === 0) return { score: 0, matched: [] };
+
+  const text = certifItems.join(' ');
+  const matched = [];
+  let totalWeight = 0;
+
+  for (const ref of certifRefs) {
+    const keywords = Array.isArray(ref.keywords) ? ref.keywords.map(normalizeStr).filter(Boolean) : [];
+    if (keywords.some((kw) => kw && text.includes(kw))) {
+      totalWeight += ref.weight;
+      matched.push(ref.name);
+    }
+  }
+
+  if (matched.length === 0) return { score: 0, matched: [] };
+
+  // Rendements décroissants : score = 100 × (1 − e^(−totalWeight/8))
+  const score = Math.min(100, Math.round(100 * (1 - Math.exp(-totalWeight / 8))));
+  return { score, matched };
+}
+
+function detectSkillsScore(cvExtractionCategories, offer) {
+  const offerTokens = extractOfferSkillTokens(offer);
+  if (offerTokens.length === 0) return { score: 50, matched: [], missing: [] };
+
+  const cvSkills = [
+    ...(Array.isArray(cvExtractionCategories?.skills) ? cvExtractionCategories.skills : []),
+    ...(Array.isArray(cvExtractionCategories?.experiences) ? cvExtractionCategories.experiences : []),
+    ...(Array.isArray(cvExtractionCategories?.certifications) ? cvExtractionCategories.certifications : []),
+    ...(Array.isArray(cvExtractionCategories?.summary) ? cvExtractionCategories.summary : []),
+  ].map(normalizeStr).filter(Boolean);
+
+  const cvText = cvSkills.join(' ');
+
+  let totalWeight = 0;
+  let matchedWeight = 0;
+  const matchedSkills = [];
+  const missingSkills = [];
+
+  for (const { token, freq } of offerTokens) {
+    totalWeight += freq;
+    // Matching bidirectionnel : token ⊂ cv OU cv_skill ⊂ token
+    const hit = cvText.includes(token) || cvSkills.some((s) => s.length >= 3 && token.includes(s));
+    if (hit) {
+      matchedWeight += freq;
+      matchedSkills.push(token);
+    } else {
+      missingSkills.push(token);
+    }
+  }
+
+  const score = Math.round((matchedWeight / totalWeight) * 100);
+  return { score, matched: matchedSkills.slice(0, 10), missing: missingSkills.slice(0, 10) };
+}
+
+function detectExperienceScore(cvExtractionCategories, offer) {
+  const offerText = normalizeStr(String(offer.experienceRequired || '') + ' ' + String(offer.description || ''));
+  const reqMatches = [...offerText.matchAll(/(\d+)\s*\+?\s*(?:ans?|years?|annees?)/g)];
+  const yearsRequired = reqMatches.length > 0 ? Math.min(...reqMatches.map((m) => parseInt(m[1], 10))) : 0;
+
+  if (yearsRequired === 0) return 70; // pas d'exigence → score neutre
+
+  const expText = [
+    ...(Array.isArray(cvExtractionCategories?.yearsOfExperience) ? cvExtractionCategories.yearsOfExperience : []),
+    ...(Array.isArray(cvExtractionCategories?.experiences) ? cvExtractionCategories.experiences : []),
+    ...(Array.isArray(cvExtractionCategories?.summary) ? cvExtractionCategories.summary : []),
+  ].map(normalizeStr).join(' ');
+
+  const candMatches = [...expText.matchAll(/(\d+)\s*(?:ans?|years?|annees?)/g)];
+  const yearsCandidate = candMatches.length > 0 ? Math.max(...candMatches.map((m) => parseInt(m[1], 10))) : 0;
+
+  if (yearsCandidate === 0) return 45; // donnée inconnue
+
+  const ratio = yearsCandidate / yearsRequired;
+  if (ratio >= 1.0) return 100;
+  if (ratio >= 0.75) return 82;
+  if (ratio >= 0.50) return 60;
+  if (ratio >= 0.25) return 35;
+  return 15;
+}
+
+function detectLocationScore(candidate, offer) {
+  const workMode = normalizeStr(offer.workMode || '');
+  const descNorm = normalizeStr(offer.description || '');
+
+  // Télétravail total dans l'offre → neutre-positif pour tous
+  if (workMode === 'remote' || descNorm.includes('teletravail') || descNorm.includes('full remote')) return 90;
+
+  const offerLoc = normalizeStr(offer.location || '');
+  const candCity = normalizeStr(candidate.city || '');
+  const candCountry = normalizeStr(candidate.country || '');
+
+  if (offerLoc && candCity && offerLoc.includes(candCity)) return 100;
+  if (offerLoc && candCountry && offerLoc.includes(candCountry)) return 80;
+  if (workMode === 'hybrid' || descNorm.includes('hybrid') || descNorm.includes('hybride')) return 72;
+  return 50;
+}
+
+// Poids adaptatifs selon les données disponibles
+function getAdaptiveWeights(hasQuiz, hasMatchCv) {
+  const w = { ...SCORE_WEIGHTS };
+
+  if (!hasQuiz) {
+    // redistribuer le poids quiz sur matchCV et skills
+    w.matchCv += 0.04;
+    w.skills += 0.06;
+    w.quiz = 0;
+  }
+
+  if (!hasMatchCv) {
+    // redistribuer matchCV sur skills + expérience
+    w.skills += w.matchCv * 0.55;
+    w.experience += w.matchCv * 0.30;
+    w.certif += w.matchCv * 0.15;
+    w.matchCv = 0;
+  }
+
+  return w;
+}
+
+async function computeCandidacyScore({ candidacy, offer, candidate, cvExtraction, quizScorePercent, certifRefs, educationRefs }) {
+  const cats = cvExtraction?.categories && typeof cvExtraction.categories === 'object' ? cvExtraction.categories : {};
+
+  // 1. MatchCV — depuis ScoreMatchOffre (TF-IDF)
+  const stored = await ScoreMatchOffre.findOne({
+    candidateId: String(candidacy.candidateId?._id || candidacy.candidateId),
+    jobOfferId: String(offer._id),
+  }).lean();
+  // Normaliser : le score peut être stocké sur 0-100 ou 0-1
+  let rawMatchCv = stored?.score != null ? Number(stored.score) : 0;
+  if (rawMatchCv > 0 && rawMatchCv <= 1) rawMatchCv = rawMatchCv * 100;
+  const matchCvScore = Math.round(rawMatchCv);
+
+  // 2. Quiz
+  const hasQuiz = Number.isFinite(quizScorePercent) && quizScorePercent > 0;
+  const quizScore = hasQuiz ? Math.round(quizScorePercent) : 0;
+
+  // 3. Skills (pondéré par fréquence dans l'offre)
+  const { score: skillsScore, matched: matchedSkills, missing: missingSkills } = detectSkillsScore(cats, offer);
+
+  // 4. Expérience (courbe lissée)
+  const experienceScore = detectExperienceScore(cats, offer);
+
+  // 5. Certifications (rendements décroissants)
+  const { score: certifScore, matched: matchedCertifs } = detectCertifScore(cats, certifRefs);
+
+  // 6. Formation
+  const { score: educationScore, level: detectedEducationLevel } = detectEducationScore(cats, educationRefs);
+
+  // 7. Localisation
+  const locationScore = detectLocationScore(candidate, offer);
+
+  // Poids adaptatifs
+  const weights = getAdaptiveWeights(hasQuiz, matchCvScore > 0);
+
+  // Score brut pondéré
+  const raw =
+    matchCvScore * weights.matchCv +
+    quizScore * weights.quiz +
+    skillsScore * weights.skills +
+    experienceScore * weights.experience +
+    certifScore * weights.certif +
+    educationScore * weights.education +
+    locationScore * weights.location;
+
+  // ── Bonus ──────────────────────────────────────────────────────────────────
+  let bonus = 0;
+  const offerTextNorm = normalizeStr([offer.title, offer.technicalSkills, offer.description].join(' '));
+
+  // +3 par certif demandée dans l'offre (plafonné à +10)
+  for (const certif of matchedCertifs) {
+    if (offerTextNorm.includes(normalizeStr(certif))) bonus = Math.min(bonus + 3, 10);
+  }
+  // +5 si excellent match skills (≥80%)
+  if (skillsScore >= 80) bonus += 5;
+  // +3 si match skills parfait (≥95%)
+  if (skillsScore >= 95) bonus += 3;
+  // +2 si le candidat a un portfolio/lien GitHub
+  const hasPortfolio = !!(candidate.portfolioUrl || (Array.isArray(cats.links) && cats.links.length > 0));
+  if (hasPortfolio) bonus += 2;
+
+  // ── Pénalités ──────────────────────────────────────────────────────────────
+  let penalty = 0;
+  // -5 par skill critique manquant (apparaît ≥3 fois dans l'offre)
+  for (const sk of missingSkills) {
+    const occ = (offerTextNorm.split(sk).length - 1);
+    if (occ >= 3) penalty += 5;
+  }
+  // -8 si expérience très insuffisante
+  if (experienceScore < 40) penalty += 8;
+  // -10 si aucun skill ne correspond
+  if (matchedSkills.length === 0 && skillsScore === 0) penalty += 10;
+
+  const finalScore = Math.round(Math.min(100, Math.max(0, raw + bonus - penalty)));
+
+  return {
+    matchCvScore,
+    quizScore,
+    skillsScore,
+    experienceScore,
+    certifScore,
+    educationScore,
+    locationScore,
+    bonus,
+    penalty,
+    finalScore,
+    matchedSkills,
+    missingSkills,
+    matchedCertifs,
+    detectedEducationLevel,
+  };
+}
+
 connectDB().finally(() => {
   httpServer.listen(PORT, () => {
     console.log(`Backend running on http://localhost:${PORT}`);
     if (mongoose.connection.readyState !== 1) {
       console.warn('Backend started without MongoDB connection. Database-backed routes will fail until MongoDB is available.');
+    } else {
+      seedReferentials();
     }
   });
 });

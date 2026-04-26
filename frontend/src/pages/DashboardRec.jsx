@@ -6,6 +6,44 @@ import { jsPDF } from 'jspdf'
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 const API_ORIGIN = API_BASE.replace(/\/api\/?$/, '')
 
+// ─── Composant cercle de score ATS ──────────────────────────────────────────
+function ScoreRing({ score, size = 88 }) {
+	const stroke = 8
+	const r = (size - stroke) / 2
+	const circ = 2 * Math.PI * r
+	const pct = Math.max(0, Math.min(100, score ?? 0))
+	const offset = circ * (1 - pct / 100)
+
+	const [ringColor, bgFill, textColor, label] =
+		pct >= 70
+			? ['#10b981', '#d1fae5', '#065f46', 'Fort']
+			: pct >= 40
+				? ['#f59e0b', '#fef3c7', '#92400e', 'Moyen']
+				: ['#ef4444', '#fee2e2', '#991b1b', 'Faible']
+
+	return (
+		<div className='relative flex-shrink-0' style={{ width: size, height: size }}>
+			<svg width={size} height={size} style={{ transform: 'rotate(-90deg)', display: 'block' }}>
+				<circle cx={size / 2} cy={size / 2} r={r} fill={bgFill} stroke='#e2e8f0' strokeWidth={stroke} />
+				<circle
+					cx={size / 2} cy={size / 2} r={r}
+					fill='none'
+					stroke={ringColor}
+					strokeWidth={stroke}
+					strokeDasharray={circ}
+					strokeDashoffset={offset}
+					strokeLinecap='round'
+				/>
+			</svg>
+			<div className='absolute inset-0 flex flex-col items-center justify-center' style={{ gap: 0 }}>
+				<span style={{ fontSize: 17, fontWeight: 900, color: textColor, lineHeight: 1 }}>{pct}</span>
+				<span style={{ fontSize: 8, fontWeight: 700, color: textColor, lineHeight: 1.2 }}>/100</span>
+				<span style={{ fontSize: 8, fontWeight: 600, color: textColor, lineHeight: 1.2 }}>{label}</span>
+			</div>
+		</div>
+	)
+}
+
 const emptyOfferForm = {
 	id: null,
 	title: '',
@@ -164,6 +202,8 @@ function DashboardRec() {
 	const [cvExtractionByCandidate, setCvExtractionByCandidate] = useState({})
 	const [cvExtractionLoadingByCandidate, setCvExtractionLoadingByCandidate] = useState({})
 	const [cvExtractionErrorByCandidate, setCvExtractionErrorByCandidate] = useState({})
+	const [scoresByOffer, setScoresByOffer] = useState({})
+	const [scoresLoadingByOffer, setScoresLoadingByOffer] = useState({})
 	const [quizReviewState, setQuizReviewState] = useState({
 		open: false,
 		candidateName: '',
@@ -286,6 +326,17 @@ function DashboardRec() {
 
 			setCandidacies(data.candidacies || [])
 			await fetchCandidateCvs(data.candidacies || [])
+
+			// Déclencher le scoring automatique pour chaque offre
+			const uniqueOfferIds = [...new Set(
+				(data.candidacies || []).map((c) => {
+					const o = c?.jobOfferId
+					return typeof o === 'object' ? o?._id : o
+				}).filter(Boolean)
+			)]
+			for (const offerId of uniqueOfferIds) {
+				fetchScoresForOffer(offerId)
+			}
 		} catch (error) {
 			setCandidaciesError('Serveur indisponible. Verifiez que le backend tourne.')
 			setCandidacies([])
@@ -424,19 +475,18 @@ function DashboardRec() {
 		setCvExtractionErrorByCandidate((prev) => ({ ...prev, [candidateId]: '' }))
 
 		try {
-			const response = await fetch(`${API_BASE}/cv/extract/${candidateId}`)
+			const response = await fetch(`${API_BASE}/cv/extraction-by-candidate/${candidateId}`)
 			const data = await response.json().catch(() => ({}))
 			if (!response.ok || !data?.success) {
-				const parts = [data?.message, data?.error, data?.hint].filter(Boolean)
-				throw new Error(parts.join(' — ') || 'Impossible d\'analyser le CV.')
+				throw new Error(data?.message || "Impossible de charger l'extraction du CV.")
 			}
-			const extractedPayload = data?.extraction && typeof data.extraction === 'object' ? data.extraction : {}
-			const storedCategories = data?.storedCategories && typeof data.storedCategories === 'object' ? data.storedCategories : null
+			const extraction = data?.extraction || {}
+			const categories = extraction?.categories && typeof extraction.categories === 'object' ? extraction.categories : null
 			setCvExtractionByCandidate((prev) => ({
 				...prev,
 				[candidateId]: {
-					...extractedPayload,
-					storedCategories,
+					entities: extraction?.rawEntities || {},
+					storedCategories: categories,
 				},
 			}))
 		} catch (error) {
@@ -446,6 +496,26 @@ function DashboardRec() {
 			}))
 		} finally {
 			setCvExtractionLoadingByCandidate((prev) => ({ ...prev, [candidateId]: false }))
+		}
+	}
+
+	const fetchScoresForOffer = async (offerId) => {
+		if (!offerId || scoresLoadingByOffer[offerId]) return
+		setScoresLoadingByOffer((prev) => ({ ...prev, [offerId]: true }))
+		try {
+			const res = await fetch(`${API_BASE}/candidacies/scores/${offerId}`)
+			const data = await res.json().catch(() => ({}))
+			if (res.ok && data?.success) {
+				const byCandidate = {}
+				for (const s of (data.scores || [])) {
+					byCandidate[s.candidateId] = s
+				}
+				setScoresByOffer((prev) => ({ ...prev, [offerId]: byCandidate }))
+			}
+		} catch {
+			// silent
+		} finally {
+			setScoresLoadingByOffer((prev) => ({ ...prev, [offerId]: false }))
 		}
 	}
 
@@ -655,8 +725,24 @@ function DashboardRec() {
 			groups.get(offerId).items.push(candidacy)
 		}
 
-		return Array.from(groups.values()).sort((a, b) => b.items.length - a.items.length)
-	}, [candidacies])
+		const result = Array.from(groups.values()).sort((a, b) => b.items.length - a.items.length)
+
+		// Trier les candidats de chaque offre par score final décroissant si disponible
+		for (const group of result) {
+			const offerScores = scoresByOffer[group.offerId]
+			if (offerScores && Object.keys(offerScores).length > 0) {
+				group.items.sort((a, b) => {
+					const idA = typeof a?.candidateId === 'string' ? a.candidateId : a?.candidateId?._id
+					const idB = typeof b?.candidateId === 'string' ? b.candidateId : b?.candidateId?._id
+					const scoreA = offerScores[idA]?.finalScore ?? -1
+					const scoreB = offerScores[idB]?.finalScore ?? -1
+					return scoreB - scoreA
+				})
+			}
+		}
+
+		return result
+	}, [candidacies, scoresByOffer])
 
 	const interviewCandidatesForOffer = useMemo(() => {
 		if (!interviewForm.offerId) return []
@@ -2266,9 +2352,19 @@ function DashboardRec() {
 												<div className='-mx-4 -mt-4 mb-3 h-1 bg-gradient-to-r from-[#06b6d4] via-[#0ea5e9] to-[#1d4ed8]' />
 												<div className='mb-3 flex items-center justify-between gap-2'>
 													<h3 className='text-base font-black text-[#103b62]'>{group.offerTitle}</h3>
-													<span className='rounded-full bg-cyan-100 px-2 py-1 text-[11px] font-semibold text-[#0a6a8f]'>
-														{group.items.length} candidature{group.items.length > 1 ? 's' : ''}
-													</span>
+													<div className='flex items-center gap-2'>
+														<span className='rounded-full bg-cyan-100 px-2 py-1 text-[11px] font-semibold text-[#0a6a8f]'>
+															{group.items.length} candidature{group.items.length > 1 ? 's' : ''}
+														</span>
+														<button
+															type='button'
+															onClick={() => fetchScoresForOffer(group.offerId)}
+															disabled={scoresLoadingByOffer[group.offerId]}
+															className='rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-[11px] font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:opacity-50'
+														>
+															{scoresLoadingByOffer[group.offerId] ? 'Calcul...' : '🎯 Scorer les candidats'}
+														</button>
+													</div>
 												</div>
 												<div className='space-y-2'>
 													{group.items.map((candidacy) => {
@@ -2297,6 +2393,43 @@ function DashboardRec() {
 														const appliedAt = candidacy?.createdAt ? new Date(candidacy.createdAt).toLocaleDateString() : 'N/A'
 														return (
 															<div key={candidacy._id} className='rounded-xl border border-cyan-100 bg-gradient-to-br from-[#f8fdff] via-white to-[#f3fbff] p-3 shadow-[0_0_0_1px_rgba(14,165,233,0.12)]'>
+																{/* Score ATS */}
+																{(() => {
+																	const sd = scoresByOffer[group.offerId]?.[candidateId]
+																	if (!sd) return null
+																	const bars = [
+																		{ label: 'Match CV', val: sd.matchCvScore, color: '#6366f1' },
+																		{ label: 'Quiz',     val: sd.quizScore,    color: '#0ea5e9' },
+																		{ label: 'Skills',   val: sd.skillsScore,  color: '#10b981' },
+																		{ label: 'Exp.',     val: sd.experienceScore, color: '#f59e0b' },
+																		{ label: 'Certif',   val: sd.certifScore,  color: '#8b5cf6' },
+																	]
+																	return (
+																		<div className='mb-3 flex items-center gap-3 rounded-xl border border-slate-100 bg-white px-3 py-2.5'>
+																			<ScoreRing score={sd.finalScore} />
+																			<div className='min-w-0 flex-1'>
+																				<p className='mb-1.5 text-[11px] font-black uppercase tracking-wide text-[#4c7b9e]'>Score ATS</p>
+																				{bars.map(({ label, val, color }) => (
+																					<div key={label} className='mb-1 flex items-center gap-1.5'>
+																						<span className='w-12 flex-shrink-0 text-[10px] font-semibold text-[#6b8cad]'>{label}</span>
+																						<div className='h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100'>
+																							<div className='h-full rounded-full transition-all' style={{ width: `${Math.max(0, Math.min(100, val))}%`, background: color }} />
+																						</div>
+																						<span className='w-7 flex-shrink-0 text-right text-[10px] font-bold' style={{ color }}>{val}%</span>
+																					</div>
+																				))}
+																				{sd.detectedEducationLevel ? (
+																					<p className='mt-1 text-[10px] text-[#7a9ab8]'>
+																						Formation: <span className='font-semibold text-[#1d486f]'>{sd.detectedEducationLevel}</span>
+																						{sd.matchedCertifs?.length > 0 ? ` · ${sd.matchedCertifs.slice(0, 2).join(', ')}` : ''}
+																						{sd.bonus > 0 ? <span className='ml-1 text-emerald-600'>+{sd.bonus} bonus</span> : null}
+																						{sd.penalty > 0 ? <span className='ml-1 text-rose-500'>−{sd.penalty} malus</span> : null}
+																					</p>
+																				) : null}
+																			</div>
+																		</div>
+																	)
+																})()}
 																<div className='flex flex-wrap items-start justify-between gap-2'>
 																	<p className='text-sm font-bold text-[#103b62]'>{fullName}</p>
 																	<button
