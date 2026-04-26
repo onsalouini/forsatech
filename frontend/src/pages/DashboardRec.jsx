@@ -424,19 +424,18 @@ function DashboardRec() {
 		setCvExtractionErrorByCandidate((prev) => ({ ...prev, [candidateId]: '' }))
 
 		try {
-			const response = await fetch(`${API_BASE}/cv/extract/${candidateId}`)
+			const response = await fetch(`${API_BASE}/cv/extraction-by-candidate/${candidateId}`)
 			const data = await response.json().catch(() => ({}))
 			if (!response.ok || !data?.success) {
-				const parts = [data?.message, data?.error, data?.hint].filter(Boolean)
-				throw new Error(parts.join(' — ') || 'Impossible d\'analyser le CV.')
+				throw new Error(data?.message || "Impossible de charger l'extraction du CV.")
 			}
-			const extractedPayload = data?.extraction && typeof data.extraction === 'object' ? data.extraction : {}
-			const storedCategories = data?.storedCategories && typeof data.storedCategories === 'object' ? data.storedCategories : null
+			const extraction = data?.extraction || {}
+			const categories = extraction?.categories && typeof extraction.categories === 'object' ? extraction.categories : null
 			setCvExtractionByCandidate((prev) => ({
 				...prev,
 				[candidateId]: {
-					...extractedPayload,
-					storedCategories,
+					entities: extraction?.rawEntities || {},
+					storedCategories: categories,
 				},
 			}))
 		} catch (error) {

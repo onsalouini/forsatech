@@ -2140,6 +2140,9 @@ app.post('/api/cv/generated', async (req, res) => {
       message: 'CV généré et enregistré avec succès.',
       cv: created,
     });
+
+    // Fire-and-forget extraction côté candidat
+    triggerCvExtractionAsync(created).catch(() => {});
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -2152,6 +2155,44 @@ app.post('/api/cv/generated', async (req, res) => {
 function resolveUploadPublicPathToAbsPath(publicPath) {
   const rel = String(publicPath || '').replace(/^\/+/, '');
   return path.join(__dirname, rel);
+}
+
+async function triggerCvExtractionAsync(cv) {
+  try {
+    const publicPath = String(cv?.uploadedFile?.path || '').trim();
+    if (!publicPath || !publicPath.startsWith('/uploads/cv/')) return;
+    const absPath = resolveUploadPublicPathToAbsPath(publicPath);
+    if (!fs.existsSync(absPath)) return;
+
+    const analyzerBaseUrl = (process.env.CV_ANALYZER_URL || 'http://127.0.0.1:8001').toString().replace(/\/+$/, '');
+    const timeoutMs = readIntEnv('CV_ANALYZER_TIMEOUT_MS', 90000, { min: 5000, max: 300000 });
+
+    const fileBuffer = await fs.promises.readFile(absPath);
+    const fileName = String(cv?.uploadedFile?.originalName || cv?.uploadedFile?.fileName || 'cv');
+    const mimeType = String(cv?.uploadedFile?.mimeType || 'application/octet-stream');
+
+    const form = new FormData();
+    form.append('file', new Blob([fileBuffer], { type: mimeType }), fileName);
+    form.append('translate', 'false');
+    form.append('target_lang', 'en');
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    const resp = await fetch(`${analyzerBaseUrl}/extract`, {
+      method: 'POST',
+      body: form,
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeout));
+
+    if (!resp.ok) return;
+    const data = await resp.json().catch(() => ({}));
+    const localCvText = await extractTextFromBuffer(fileBuffer, mimeType, fileName);
+    const extractionToStore = buildStructuredCvExtraction(data, { fallbackText: localCvText });
+    await CV.findByIdAndUpdate(cv._id, { $set: { extraction: extractionToStore } });
+  } catch {
+    // Silent fail — extraction is best-effort
+  }
 }
 
 async function findActiveOrLatestCv(candidateId, { lean = false } = {}) {
@@ -2745,6 +2786,9 @@ app.post('/api/cv/upload', (req, res) => {
         },
       });
 
+      // Fire-and-forget extraction côté candidat
+      triggerCvExtractionAsync(created).catch(() => {});
+
       return res.status(200).json({
         success: true,
         message: 'CV uploadé et enregistré avec succès.',
@@ -2876,6 +2920,60 @@ app.get('/api/cv/by-id/:cvId', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Erreur serveur pendant la récupération du CV.',
+      error: error.message,
+    });
+  }
+});
+
+app.get('/api/cv/extraction-by-candidate/:candidateId', async (req, res) => {
+  try {
+    const { candidateId } = req.params;
+    if (!candidateId || !mongoose.Types.ObjectId.isValid(String(candidateId))) {
+      return res.status(400).json({ success: false, message: 'candidateId invalide.' });
+    }
+    const cv = await CV.findOne({ candidateId }).sort({ isActive: -1, createdAt: -1 })
+      .select('_id extraction source uploadedFile personal createdAt updatedAt isActive')
+      .lean();
+    if (!cv) {
+      return res.status(404).json({ success: false, message: 'CV introuvable.' });
+    }
+    return res.status(200).json({
+      success: true,
+      candidateId: String(candidateId),
+      cvId: String(cv._id),
+      source: cv.source || '',
+      fileName: cv?.uploadedFile?.originalName || cv?.uploadedFile?.fileName || '',
+      updatedAt: cv.updatedAt || null,
+      extraction: cv.extraction || null,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur.',
+      error: error.message,
+    });
+  }
+});
+
+app.get('/api/cv/extraction-data/:cvId', async (req, res) => {
+  try {
+    const { cvId } = req.params;
+    if (!cvId || !mongoose.Types.ObjectId.isValid(String(cvId))) {
+      return res.status(400).json({ success: false, message: 'cvId invalide.' });
+    }
+    const cv = await CV.findById(cvId).select('extraction source uploadedFile personal createdAt updatedAt isActive').lean();
+    if (!cv) {
+      return res.status(404).json({ success: false, message: 'CV introuvable.' });
+    }
+    return res.status(200).json({
+      success: true,
+      cvId: String(cvId),
+      extraction: cv.extraction || null,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Erreur serveur.',
       error: error.message,
     });
   }

@@ -100,6 +100,9 @@ function DashboardCand() {
 	const [suggestionsHint, setSuggestionsHint] = useState('')
 	const [suggestionsData, setSuggestionsData] = useState(null)
 
+	const [cvExtraction, setCvExtraction] = useState(null)
+	const [cvExtractionLoading, setCvExtractionLoading] = useState(false)
+
 	const [assistantChatId, setAssistantChatId] = useState(null)
 	const [assistantMessages, setAssistantMessages] = useState(() => [
 		{ role: 'assistant', content: "Bonjour, je suis l’Assistant IA d’A.I.R. Pose-moi tes questions sur ton CV, ta candidature, ou la préparation d’entretien." },
@@ -894,6 +897,32 @@ function DashboardCand() {
 		setSuggestionsHint('')
 	}, [selectedView])
 
+	useEffect(() => {
+		if (!selectedCvId) {
+			setCvExtraction(null)
+			return
+		}
+		let cancelled = false
+		setCvExtractionLoading(true)
+		;(async () => {
+			try {
+				const res = await fetch(`${API_BASE}/cv/extraction-data/${selectedCvId}`)
+				const data = await res.json().catch(() => ({}))
+				if (cancelled) return
+				if (res.ok && data?.success) {
+					setCvExtraction(data?.extraction || null)
+				} else {
+					setCvExtraction(null)
+				}
+			} catch {
+				if (!cancelled) setCvExtraction(null)
+			} finally {
+				if (!cancelled) setCvExtractionLoading(false)
+			}
+		})()
+		return () => { cancelled = true }
+	}, [selectedCvId])
+
 	const appliedOfferIds = useMemo(() => {
 		const ids = new Set()
 		for (const c of candidacies) {
@@ -1655,6 +1684,8 @@ function DashboardCand() {
 								selectedCvMeta={selectedCvMeta}
 								handleSetActiveCv={handleSetActiveCv}
 								apiOrigin={API_ORIGIN}
+								cvExtraction={cvExtraction}
+								cvExtractionLoading={cvExtractionLoading}
 							/>
 						) : selectedView === 'suggestions' ? (
 							<DashboardCandSuggestionsView

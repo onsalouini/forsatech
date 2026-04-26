@@ -2,6 +2,83 @@
 import React from 'react'
 import { Badge } from './ui'
 
+const EXTRACTION_LABELS = {
+	names: 'Nom(s)',
+	emails: 'Email(s)',
+	phones: 'Téléphone(s)',
+	titles: 'Titre(s) professionnel(s)',
+	skills: 'Compétences',
+	experiences: 'Expériences professionnelles',
+	education: 'Formation',
+	certifications: 'Certifications',
+	projects: 'Projets',
+	languages: 'Langues',
+	locations: 'Localisation(s)',
+	links: 'Liens',
+	yearsOfExperience: "Années d'expérience",
+	summary: 'Résumé / Profil',
+}
+
+function ExtractionSection({ extraction, loading }) {
+	if (loading) {
+		return (
+			<div className='mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-500'>
+				Analyse du CV en cours…
+			</div>
+		)
+	}
+
+	const categories = extraction?.categories
+	if (!categories) {
+		return (
+			<div className='mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500'>
+				Aucune extraction disponible. L'analyse se lance automatiquement après l'upload ou la création du CV.
+			</div>
+		)
+	}
+
+	const lastExtracted = extraction?.lastExtractedAt
+		? new Date(extraction.lastExtractedAt).toLocaleString('fr-FR')
+		: null
+
+	const nonEmptyKeys = Object.keys(EXTRACTION_LABELS).filter(
+		(key) => Array.isArray(categories[key]) && categories[key].length > 0,
+	)
+
+	if (nonEmptyKeys.length === 0) {
+		return (
+			<div className='mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500'>
+				Aucune donnée extraite pour ce CV.
+			</div>
+		)
+	}
+
+	return (
+		<div className='mt-4 space-y-3'>
+			{lastExtracted && (
+				<p className='text-xs text-slate-400'>Dernière analyse : {lastExtracted}</p>
+			)}
+			<div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3'>
+				{nonEmptyKeys.map((key) => (
+					<div key={key} className='rounded-xl border border-[#bdd8ef] bg-white p-3 shadow-sm'>
+						<p className='mb-2 text-xs font-black tracking-wide text-[#0d355b] uppercase'>{EXTRACTION_LABELS[key]}</p>
+						<div className='flex flex-wrap gap-1.5'>
+							{categories[key].map((val, i) => (
+								<span
+									key={i}
+									className='inline-block rounded-lg bg-[#edf6ff] px-2 py-0.5 text-xs font-semibold text-[#1c4f80] border border-[#c9e2f6]'
+								>
+									{String(val)}
+								</span>
+							))}
+						</div>
+					</div>
+				))}
+			</div>
+		</div>
+	)
+}
+
 export function DashboardCandCvView({
 	activeCvMeta,
 	cvUrl,
@@ -19,6 +96,8 @@ export function DashboardCandCvView({
 	selectedCvMeta,
 	handleSetActiveCv,
 	apiOrigin,
+	cvExtraction,
+	cvExtractionLoading,
 }) {
 	return (
 		<div className='mt-8 rounded-2xl border border-[#9fc3e1] bg-gradient-to-br from-[#f7fbff] via-[#edf6ff] to-[#deedfb] p-5 ring-1 ring-[#bdd8ef] shadow-[0_14px_34px_rgba(8,51,93,0.13)]'>
@@ -131,6 +210,14 @@ export function DashboardCandCvView({
 			) : !cvHistoryLoading && !cvHistoryError ? (
 				<div className='mt-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700'>
 					Aucun CV trouvé. Uploadez un CV ou générez-en un.
+				</div>
+			) : null}
+
+			{cvHistory.length > 0 && selectedCvId ? (
+				<div className='mt-6'>
+					<p className='text-base font-bold text-[#0d355b] mb-1'>Extraction complète du CV</p>
+					<p className='text-xs text-[#4f7191] mb-2'>Données extraites automatiquement par notre modèle IA.</p>
+					<ExtractionSection extraction={cvExtraction} loading={cvExtractionLoading} />
 				</div>
 			) : null}
 		</div>
