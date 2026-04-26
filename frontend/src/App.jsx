@@ -37,7 +37,7 @@ function App() {
     location.pathname === '/mot-de-passe-oublie'
 
   const contentPadding = isDashboardPage || isAuthPage ? '' : 'px-4 sm:px-[5vw] md:px-[7vw] lg:px-[9vw]'
-  const showChatWidget = isDashboardPage
+  const showChatWidget = isDashboardPage && !location.pathname.startsWith('/meet')
 
   return (
     <div className='min-h-screen flex flex-col'>

@@ -1219,10 +1219,12 @@ function DashboardRec() {
 	}
 
 	const handleJoinInterview = (meetingLink, interviewId) => {
-		if (!meetingLink) return
+		const raw = String(meetingLink || '').trim()
+		if (!raw) return
+		const normalizedLink = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
 		const displayName = `${recruiter?.firstName || ''} ${recruiter?.lastName || ''}`.trim() || recruiter?.company || 'Recruteur AIR'
 		const interviewQuery = interviewId ? `&interviewId=${encodeURIComponent(interviewId)}` : ''
-		navigate(`/meet?url=${encodeURIComponent(meetingLink)}&name=${encodeURIComponent(displayName)}&role=recruteur${interviewQuery}`)
+		navigate(`/meet?url=${encodeURIComponent(normalizedLink)}&name=${encodeURIComponent(displayName)}&role=recruteur${interviewQuery}`)
 	}
 
 	const updateReportEvalField = (interviewId, field, value) => {

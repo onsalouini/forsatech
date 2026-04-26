@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import logo21 from '../../dist/logo21.png'
 
 const isHttpUrl = (value) => /^https?:\/\//i.test(String(value || '').trim())
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n))
+const isLikelyJitsiUrl = (value) => /jitsi|meet\.jit\.si/i.test(String(value || ''))
 
 function InterviewMeet() {
 	const location = useLocation()
@@ -28,23 +30,49 @@ function InterviewMeet() {
 	const lastActivityRef = useRef(Date.now())
 	const hasWindowFocusRef = useRef(true)
 
+	const fallbackMeetUrl = useMemo(() => {
+		const token = String(interviewId || '').replace(/[^a-zA-Z0-9-]/g, '')
+		if (!token) return ''
+		return `https://meet.jit.si/AIR-${token}`
+	}, [interviewId])
+
+	const effectiveMeetUrl = useMemo(() => {
+		if (isHttpUrl(rawUrl)) {
+			try {
+				const u = new URL(rawUrl)
+				if (isLikelyJitsiUrl(u.hostname)) return rawUrl
+			} catch {
+				// ignore and fallback below
+			}
+		}
+		if (fallbackMeetUrl) return fallbackMeetUrl
+		return isHttpUrl(rawUrl) ? rawUrl : ''
+	}, [rawUrl, fallbackMeetUrl])
+
 	const roomLabel = useMemo(() => {
-		if (!isHttpUrl(rawUrl)) return 'Salle non valide'
+		if (!isHttpUrl(effectiveMeetUrl)) return 'Salle non valide'
 		try {
-			const u = new URL(rawUrl)
+			const u = new URL(effectiveMeetUrl)
 			const parts = u.pathname.split('/').filter(Boolean)
 			return parts[parts.length - 1] || 'Entretien AIR'
 		} catch {
 			return 'Entretien AIR'
 		}
-	}, [rawUrl])
+	}, [effectiveMeetUrl])
 
 	const iframeUrl = useMemo(() => {
-		if (!isHttpUrl(rawUrl)) return ''
+		if (!isHttpUrl(effectiveMeetUrl)) return ''
 		try {
-			const u = new URL(rawUrl)
+			const u = new URL(effectiveMeetUrl)
+			if (!isLikelyJitsiUrl(u.hostname)) return u.toString()
 			const safeName = String(displayName || '').replace(/"/g, '').trim()
-			const hashParts = ['config.prejoinPageEnabled=false']
+			const hashParts = [
+				'config.prejoinPageEnabled=false',
+				'config.startWithVideoMuted=false',
+				'config.startWithAudioMuted=false',
+				'config.startAudioOnly=false',
+				'config.disableDeepLinking=true',
+			]
 			if (safeName) {
 				hashParts.push(`userInfo.displayName=\"${encodeURIComponent(safeName)}\"`)
 			}
@@ -53,7 +81,7 @@ function InterviewMeet() {
 		} catch {
 			return ''
 		}
-	}, [rawUrl, displayName])
+	}, [effectiveMeetUrl, displayName])
 
 	const normalizedRole = useMemo(() => {
 		const r = String(role || '').toLowerCase()
@@ -61,6 +89,40 @@ function InterviewMeet() {
 		if (r.includes('cand')) return 'candidate'
 		return 'candidate'
 	}, [role])
+
+	const dashboardPath = useMemo(() => {
+		return normalizedRole === 'recruiter' ? '/EspaceRecruteur' : '/EspaceCandidat/dashboard'
+	}, [normalizedRole])
+
+	const localConcentrationBadge = useMemo(() => {
+		if (!Number.isFinite(localScore)) return 'text-slate-600 bg-slate-100 border-slate-200'
+		if (localScore >= 75) return 'text-emerald-700 bg-emerald-50 border-emerald-200'
+		if (localScore >= 50) return 'text-amber-700 bg-amber-50 border-amber-200'
+		return 'text-rose-700 bg-rose-50 border-rose-200'
+	}, [localScore])
+
+	const localStressBadge = useMemo(() => {
+		if (!Number.isFinite(localStress)) return 'text-slate-600 bg-slate-100 border-slate-200'
+		if (localStress <= 35) return 'text-emerald-700 bg-emerald-50 border-emerald-200'
+		if (localStress <= 65) return 'text-amber-700 bg-amber-50 border-amber-200'
+		return 'text-rose-700 bg-rose-50 border-rose-200'
+	}, [localStress])
+
+	const recruiterConcentrationBadge = useMemo(() => {
+		const score = Number(recruiterSummary?.averageScore)
+		if (!Number.isFinite(score)) return 'text-slate-600 bg-slate-100 border-slate-200'
+		if (score >= 75) return 'text-emerald-700 bg-emerald-50 border-emerald-200'
+		if (score >= 50) return 'text-amber-700 bg-amber-50 border-amber-200'
+		return 'text-rose-700 bg-rose-50 border-rose-200'
+	}, [recruiterSummary])
+
+	const recruiterStressBadge = useMemo(() => {
+		const stress = Number(recruiterSummary?.averageStress)
+		if (!Number.isFinite(stress)) return 'text-slate-600 bg-slate-100 border-slate-200'
+		if (stress <= 35) return 'text-emerald-700 bg-emerald-50 border-emerald-200'
+		if (stress <= 65) return 'text-amber-700 bg-amber-50 border-amber-200'
+		return 'text-rose-700 bg-rose-50 border-rose-200'
+	}, [recruiterSummary])
 
 	useEffect(() => {
 		const markActive = () => {
@@ -268,7 +330,7 @@ function InterviewMeet() {
 		URL.revokeObjectURL(url)
 	}
 
-	if (!isHttpUrl(rawUrl)) {
+	if (!isHttpUrl(effectiveMeetUrl)) {
 		return (
 			<div className='min-h-screen bg-slate-950 px-4 py-10 text-white'>
 				<div className='mx-auto max-w-2xl rounded-2xl border border-rose-400/40 bg-rose-950/30 p-6'>
@@ -287,130 +349,187 @@ function InterviewMeet() {
 	}
 
 	return (
-		<div className='min-h-screen bg-slate-950 text-white'>
-			<div className='flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-slate-900/90 px-4 py-3'>
-				<div>
-					<p className='text-xs font-bold uppercase tracking-[0.12em] text-cyan-300'>{role || 'entretien'}</p>
-					<p className='text-sm font-semibold text-white/90'>{roomLabel}</p>
-					{normalizedRole === 'candidate' ? (
-						<p className='mt-1 text-xs text-slate-300'>Concentration locale: {localScore ?? '--'}/100 | Stress estime: {localStress ?? '--'}/100</p>
-					) : null}
-					{normalizedRole === 'recruiter' ? (
-						<p className='mt-1 text-xs text-slate-300'>Score global candidat: {recruiterSummary?.overallScore100 ?? '--'}/100 | Concentration: {recruiterSummary?.averageScore ?? '--'} | Stress: {recruiterSummary?.averageStress ?? '--'}</p>
-					) : null}
+		<div className='min-h-screen bg-slate-50 text-slate-900'>
+			<div className='flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-5 py-4'>
+				<div className='flex items-center gap-3'>
+					<button
+						type='button'
+						onClick={() => navigate(dashboardPath)}
+						className='group relative rounded-full p-0.5 transition duration-300 hover:scale-[1.03]'
+						title='Retour dashboard AIR'
+					>
+						<span className='absolute inset-0 rounded-full bg-cyan-400/30 blur-md transition group-hover:bg-cyan-300/40' />
+						<span className='relative block rounded-full ring-2 ring-cyan-300/80 shadow-[0_0_26px_rgba(34,211,238,0.45)]'>
+							<img src={logo21} alt='AIR logo' className='h-14 w-14 rounded-full object-cover' />
+						</span>
+					</button>
+					<div>
+						<p className='text-[10px] font-black uppercase tracking-[0.14em] text-cyan-700'>AIR Meet</p>
+						<p className='text-sm font-semibold text-slate-800'>{roomLabel}</p>
+						<p className='mt-1 text-xs text-slate-600'>Session Jitsi intégrée dans AIR</p>
+					</div>
 				</div>
 				<div className='flex items-center gap-2'>
 					<input
-						className='w-56 rounded-lg border border-white/20 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-cyan-400'
-						placeholder='Nom affiche dans la reunion'
+						className='w-52 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-cyan-500 md:w-64'
+						placeholder='Nom affiché dans la réunion'
 						value={displayName}
 						onChange={(e) => setDisplayName(e.target.value)}
 					/>
-					<a
-						href={iframeUrl || rawUrl}
-						target='_blank'
-						rel='noreferrer'
-						className='rounded-lg border border-cyan-400/50 px-3 py-2 text-xs font-bold text-cyan-200 hover:bg-cyan-400/10'
-					>
-						Ouvrir dans un nouvel onglet
-					</a>
 					{normalizedRole === 'recruiter' ? (
-						<>
-							<button
-								type='button'
-								onClick={loadExistingReport}
-								className='rounded-lg border border-emerald-400/50 px-3 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-400/10'
-							>
-								Voir bilan
-							</button>
-							<button
-								type='button'
-								onClick={handleGenerateReportAndFinish}
-								disabled={reportLoading}
-								className='rounded-lg border border-cyan-300/60 bg-cyan-900/40 px-3 py-2 text-xs font-bold text-cyan-100 hover:bg-cyan-800/50 disabled:opacity-60'
-							>
-								{reportLoading ? 'Generation...' : 'Terminer + bilan complet'}
-							</button>
-						</>
+						<button
+							type='button'
+							onClick={loadExistingReport}
+							className='rounded-lg border border-emerald-300 bg-white px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50'
+						>
+							Voir bilan
+						</button>
 					) : null}
 					<button
 						type='button'
-						onClick={() => navigate(-1)}
-						className='rounded-lg border border-white/20 px-3 py-2 text-xs font-bold hover:bg-white/10'
+						onClick={() => navigate(dashboardPath)}
+						className='rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100'
 					>
-						Quitter
+						Retour dashboard
 					</button>
 				</div>
 			</div>
-			{normalizedRole === 'recruiter' ? (
-				<div className='mx-4 mt-3 rounded-xl border border-cyan-400/30 bg-cyan-950/30 px-4 py-3 text-xs text-cyan-100'>
-					<p className='font-bold'>Panel concentration (indicatif)</p>
-					<p className='mt-1'>Score global: {recruiterSummary?.overallScore100 ?? '--'}/100 | Concentration: {recruiterSummary?.averageScore ?? '--'} | Stress: {recruiterSummary?.averageStress ?? '--'} | Echantillons: {recruiterSummary?.sampleCount ?? 0}</p>
-					{summaryError ? <p className='mt-1 text-rose-200'>{summaryError}</p> : null}
-					{reportError ? <p className='mt-1 text-rose-200'>{reportError}</p> : null}
-					{evaluationMessage ? <p className='mt-1 text-emerald-200'>{evaluationMessage}</p> : null}
-					{reportData ? (
-						<div className='mt-3 rounded-lg border border-cyan-300/30 bg-slate-900/40 p-3 text-cyan-50'>
-							<div className='flex items-center justify-between gap-2'>
-								<p className='font-bold'>Bilan complet disponible</p>
-								<button
-									type='button'
-									onClick={downloadReportJson}
-									className='rounded border border-cyan-300/50 px-2 py-1 text-[11px] font-bold hover:bg-cyan-800/40'
-								>
-									Exporter JSON
-								</button>
+
+			<div className='h-[calc(100vh-86px)] overflow-y-auto bg-white'>
+				<div className='mx-auto w-full max-w-[1460px] px-4 py-4'>
+					<div className='grid grid-cols-1 gap-4 lg:grid-cols-[420px_minmax(0,1fr)]'>
+						<aside className='order-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:order-1 lg:sticky lg:top-4 lg:max-h-[calc(100vh-120px)] lg:overflow-y-auto'>
+					{normalizedRole === 'candidate' ? (
+						<div className='grid grid-cols-1 gap-4'>
+							<div className='rounded-xl border border-slate-200 bg-white p-4 shadow-sm'>
+								<p className='text-sm font-black text-[#0d355b]'>Détection en direct</p>
+								<div className='mt-3 grid grid-cols-1 gap-3'>
+									<div className={`rounded-lg border px-3 py-2 ${localConcentrationBadge}`}>
+										<p className='text-[11px] font-black uppercase tracking-wide'>Concentration</p>
+										<p className='mt-1 text-lg font-black'>{localScore ?? '--'}/100</p>
+									</div>
+									<div className={`rounded-lg border px-3 py-2 ${localStressBadge}`}>
+										<p className='text-[11px] font-black uppercase tracking-wide'>Stress estimé</p>
+										<p className='mt-1 text-lg font-black'>{localStress ?? '--'}/100</p>
+									</div>
+								</div>
+								<p className='mt-3 text-xs text-slate-600'>Gardez l onglet actif et la caméra ouverte pour des mesures fiables.</p>
 							</div>
-							<p className='mt-2'>Resume: {reportData?.summary?.summaryText || '—'}</p>
-							<p className='mt-1'>Score global: {reportData?.summary?.overallScore100 ?? '--'}/100 | Concentration: {reportData?.metricsOverview?.averageScore ?? '--'} | Stress: {reportData?.metricsOverview?.averageStress ?? '--'}</p>
-							<p className='mt-1'>Duree: {reportData?.metricsOverview?.durationMinutes ?? 0} min | Echantillons: {reportData?.metricsOverview?.sampleCount ?? 0} | Focus: {reportData?.behaviorAnalysis?.focusRate ?? '--'}%</p>
-							<div className='mt-3 rounded-md border border-cyan-300/25 bg-slate-900/50 p-2'>
-								<p className='text-[11px] font-bold uppercase tracking-wide text-cyan-200'>Evaluation recruteur</p>
-								<div className='mt-2 flex items-center gap-2'>
+							<div className='rounded-xl border border-cyan-200 bg-cyan-50 p-4 text-xs text-cyan-900'>
+								<p className='font-bold'>Conseils rapides</p>
+								<ul className='mt-2 list-disc space-y-1 pl-4'>
+									<li>Placez votre visage au centre de la caméra.</li>
+									<li>Réduisez les changements d onglet pendant l entretien.</li>
+									<li>Vérifiez micro/caméra autorisés dans le navigateur.</li>
+								</ul>
+								<div className='mt-3 rounded-lg border border-cyan-200 bg-white/70 p-3 text-[11px]'>
+									Une bonne lumière et un cadrage stable améliorent la lecture des signaux.
+								</div>
+							</div>
+						</div>
+					) : (
+						<>
+							<div className='grid grid-cols-1 gap-4'>
+								<div className='rounded-xl border border-cyan-200 bg-cyan-50 p-4 text-xs text-cyan-900'>
+									<p className='font-bold'>Panel concentration candidat</p>
+									<div className='mt-2 grid grid-cols-1 gap-2'>
+										<div className={`rounded-lg border px-3 py-2 ${recruiterConcentrationBadge}`}>
+											<p className='text-[11px] font-black uppercase tracking-wide'>Concentration moyenne</p>
+											<p className='mt-1 text-base font-black'>{recruiterSummary?.averageScore ?? '--'}/100</p>
+										</div>
+										<div className={`rounded-lg border px-3 py-2 ${recruiterStressBadge}`}>
+											<p className='text-[11px] font-black uppercase tracking-wide'>Stress moyen</p>
+											<p className='mt-1 text-base font-black'>{recruiterSummary?.averageStress ?? '--'}/100</p>
+										</div>
+									</div>
+									<p className='mt-2'>Score global: {recruiterSummary?.overallScore100 ?? '--'}/100 | Echantillons: {recruiterSummary?.sampleCount ?? 0}</p>
+									{summaryError ? <p className='mt-2 text-rose-700'>{summaryError}</p> : null}
+								</div>
+								<div className='rounded-xl border border-slate-200 bg-white p-4 shadow-sm'>
+									<div className='flex items-center justify-between gap-2'>
+										<p className='text-sm font-black text-[#0d355b]'>Bilan entretien</p>
+										<button
+											type='button'
+											onClick={handleGenerateReportAndFinish}
+											disabled={reportLoading}
+											className='rounded border border-cyan-300 bg-cyan-50 px-2 py-1 text-[11px] font-bold text-cyan-800 hover:bg-cyan-100 disabled:opacity-60'
+										>
+											{reportLoading ? 'Generation...' : 'Generer bilan'}
+										</button>
+									</div>
+									{reportError ? <p className='mt-2 text-xs text-rose-700'>{reportError}</p> : null}
+									{evaluationMessage ? <p className='mt-2 text-xs text-emerald-700'>{evaluationMessage}</p> : null}
+									{reportData ? (
+										<>
+											<p className='mt-2 text-xs text-slate-700'>Résumé: {reportData?.summary?.summaryText || '—'}</p>
+											<p className='mt-1 text-xs text-slate-700'>Score global: {reportData?.summary?.overallScore100 ?? '--'}/100</p>
+											<p className='mt-1 text-xs text-slate-700'>Focus: {reportData?.behaviorAnalysis?.focusRate ?? '--'}% | Durée: {reportData?.metricsOverview?.durationMinutes ?? 0} min</p>
+											<div className='mt-2'>
+												<button
+													type='button'
+													onClick={downloadReportJson}
+													className='rounded border border-cyan-300 bg-cyan-50 px-2 py-1 text-[11px] font-bold text-cyan-800 hover:bg-cyan-100'
+												>
+													Exporter JSON
+												</button>
+											</div>
+										</>
+									) : (
+										<p className='mt-2 text-xs text-slate-500'>Aucun bilan disponible pour le moment.</p>
+									)}
+								</div>
+							</div>
+
+							<div className='mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm'>
+								<p className='text-sm font-black text-[#0d355b]'>Evaluation recruteur</p>
+								<div className='mt-3 flex flex-wrap items-center gap-2'>
 									{[1, 2, 3, 4, 5].map((star) => (
 										<button
 											key={`eval-star-${star}`}
 											type='button'
 											onClick={() => setEvaluationRating(star)}
-											className={`h-7 w-7 rounded-full border text-sm transition ${star <= evaluationRating ? 'border-amber-300 bg-amber-100 text-amber-700' : 'border-slate-600 bg-slate-800 text-slate-300'}`}
+											className={`h-8 w-8 rounded-full border text-sm transition ${star <= evaluationRating ? 'border-amber-300 bg-amber-100 text-amber-700' : 'border-slate-300 bg-white text-slate-500'}`}
 										>
 											★
 										</button>
 									))}
 								</div>
 								<textarea
-									rows={2}
+									rows={3}
 									value={evaluationComment}
 									onChange={(e) => setEvaluationComment(e.target.value)}
 									placeholder='Commentaire RH (optionnel)'
-									className='mt-2 w-full rounded border border-cyan-300/25 bg-slate-950 px-2 py-1 text-xs text-cyan-50 outline-none'
+									className='mt-3 w-full rounded border border-slate-300 bg-white px-2 py-2 text-xs text-slate-700 outline-none focus:border-cyan-500'
 								/>
-								<button
-									type='button'
-									onClick={handleSaveRecruiterEvaluation}
-									disabled={evaluationSaving}
-									className='mt-2 rounded border border-cyan-300/40 px-2 py-1 text-[11px] font-bold hover:bg-cyan-800/40 disabled:opacity-60'
-								>
-									{evaluationSaving ? 'Enregistrement...' : 'Enregistrer evaluation'}
-								</button>
+								<div className='mt-3 flex items-center justify-between gap-3'>
+									<p className='text-[11px] text-slate-500'>Ajoutez un feedback concret pour aider le candidat à progresser.</p>
+									<button
+										type='button'
+										onClick={handleSaveRecruiterEvaluation}
+										disabled={evaluationSaving}
+										className='rounded border border-cyan-300 bg-cyan-50 px-3 py-1.5 text-[11px] font-bold text-cyan-800 hover:bg-cyan-100 disabled:opacity-60'
+									>
+										{evaluationSaving ? 'Enregistrement...' : 'Enregistrer evaluation'}
+									</button>
+								</div>
 							</div>
-							{Array.isArray(reportData?.recommendations) && reportData.recommendations.length > 0 ? (
-								<ul className='mt-2 list-disc pl-5'>
-									{reportData.recommendations.slice(0, 3).map((rec, idx) => (
-										<li key={`rec-${idx}`}>{rec}</li>
-									))}
-								</ul>
-							) : null}
+						</>
+					)}
+						</aside>
+
+						<div className='order-1 lg:order-2'>
+							<div className='overflow-hidden rounded-2xl border border-slate-200 bg-black shadow-sm'>
+								<iframe
+									title='AIR Interview Meet'
+									src={iframeUrl || effectiveMeetUrl}
+									allow='camera; microphone; fullscreen; display-capture; autoplay; clipboard-read; clipboard-write'
+									className='h-[calc(100vh-120px)] min-h-[560px] w-full border-0'
+								/>
+							</div>
 						</div>
-					) : null}
+					</div>
 				</div>
-			) : null}
-			<iframe
-				title='AIR Interview Meet'
-				src={iframeUrl || rawUrl}
-				allow='camera; microphone; fullscreen; display-capture; autoplay; clipboard-read; clipboard-write'
-				className='h-[calc(100vh-72px)] w-full border-0'
-			/>
+			</div>
 		</div>
 	)
 }
