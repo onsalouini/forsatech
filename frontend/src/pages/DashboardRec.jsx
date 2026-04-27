@@ -2061,7 +2061,8 @@ function DashboardRec() {
 												</button>
 												<span className='min-w-[140px] text-center text-xs font-bold text-[#103b62]'>{calendarTitle}</span>
 												<button
-													type='button'
+													type='button'Candidats par offre
+
 													onClick={goToNextMonth}
 													className='rounded-lg border border-cyan-300 bg-white px-2.5 py-1 text-sm font-semibold text-[#0a5f88] transition hover:bg-cyan-50'
 												>
@@ -2443,11 +2444,7 @@ function DashboardRec() {
 																		Donner rendez-vous
 																	</button>
 																</div>
-																<ScoreButton
-                                                                  candidacyId={candidacy._id}
-                                                                  existingScore={candidacy.sbertScore}   // shows saved score immediately
-                                                                  onScored={(newScore) => console.log(newScore)}  // optional callback
-                                                                />
+															
 																<p className='mt-1 text-xs text-[#587a99]'>
 																	{cand.email || 'Email non renseigne'}
 																	{cand.professionalTitle ? ` - ${cand.professionalTitle}` : ''}
