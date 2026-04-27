@@ -7,6 +7,31 @@ import ScoreButton from '../components/ScoreButton'
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 const API_ORIGIN = API_BASE.replace(/\/api\/?$/, '')
 
+const normalizeEntityId = (value) => {
+	if (!value) return ''
+	if (typeof value === 'string') return value
+	if (typeof value === 'number') return String(value)
+	if (typeof value === 'object') {
+		if (typeof value._id === 'string') return value._id
+		if (value._id && typeof value._id.toString === 'function') {
+			const id = value._id.toString()
+			if (id && id !== '[object Object]') return id
+		}
+		if (typeof value.id === 'string') return value.id
+		if (value.$oid) return String(value.$oid)
+		if (typeof value.toString === 'function') {
+			const id = value.toString()
+			if (id && id !== '[object Object]') return id
+		}
+	}
+	return ''
+}
+
+const getNumericScore = (value, fallback = -1) => {
+	const parsed = Number(value)
+	return Number.isFinite(parsed) ? parsed : fallback
+}
+
 // ─── Composant cercle de score ATS ──────────────────────────────────────────
 function ScoreRing({ score, size = 88 }) {
 	const stroke = 8
@@ -509,7 +534,13 @@ function DashboardRec() {
 			if (res.ok && data?.success) {
 				const byCandidate = {}
 				for (const s of (data.scores || [])) {
-					byCandidate[s.candidateId] = s
+					const candidateId = normalizeEntityId(s?.candidateId)
+					if (!candidateId) continue
+					byCandidate[candidateId] = {
+						...s,
+						candidateId,
+						finalScore: getNumericScore(s?.finalScore, 0),
+					}
 				}
 				setScoresByOffer((prev) => ({ ...prev, [offerId]: byCandidate }))
 			}
@@ -726,20 +757,50 @@ function DashboardRec() {
 			groups.get(offerId).items.push(candidacy)
 		}
 
-		const result = Array.from(groups.values()).sort((a, b) => b.items.length - a.items.length)
+		const getGroupTopScore = (group) => {
+			const offerScores = scoresByOffer[group.offerId]
+			if (!offerScores) return -1
 
-		// Trier les candidats de chaque offre par score final décroissant si disponible
+			let topScore = -1
+			for (const item of group.items) {
+				const candidateId = normalizeEntityId(item?.candidateId)
+				const score = getNumericScore(offerScores?.[candidateId]?.finalScore)
+				if (score > topScore) topScore = score
+			}
+			return topScore
+		}
+
+		const result = Array.from(groups.values()).map((group) => ({
+			...group,
+			topScore: getGroupTopScore(group),
+		}))
+
+		result.sort((a, b) => {
+			const topA = a.topScore
+			const topB = b.topScore
+			if (topB !== topA) return topB - topA
+			if (b.items.length !== a.items.length) return b.items.length - a.items.length
+			return String(a.offerTitle || '').localeCompare(String(b.offerTitle || ''), 'fr')
+		})
+
+		// Trier les candidats de chaque offre par score final décroissant.
 		for (const group of result) {
 			const offerScores = scoresByOffer[group.offerId]
-			if (offerScores && Object.keys(offerScores).length > 0) {
-				group.items.sort((a, b) => {
-					const idA = typeof a?.candidateId === 'string' ? a.candidateId : a?.candidateId?._id
-					const idB = typeof b?.candidateId === 'string' ? b.candidateId : b?.candidateId?._id
-					const scoreA = offerScores[idA]?.finalScore ?? -1
-					const scoreB = offerScores[idB]?.finalScore ?? -1
-					return scoreB - scoreA
-				})
-			}
+			group.items.sort((a, b) => {
+				const idA = normalizeEntityId(a?.candidateId)
+				const idB = normalizeEntityId(b?.candidateId)
+				const scoreA = getNumericScore(offerScores?.[idA]?.finalScore)
+				const scoreB = getNumericScore(offerScores?.[idB]?.finalScore)
+				if (scoreB !== scoreA) return scoreB - scoreA
+
+				const dateA = new Date(a?.createdAt || 0).getTime()
+				const dateB = new Date(b?.createdAt || 0).getTime()
+				if (dateB !== dateA) return dateB - dateA
+
+				const nameA = `${a?.candidateId?.firstName || ''} ${a?.candidateId?.lastName || ''}`.trim()
+				const nameB = `${b?.candidateId?.firstName || ''} ${b?.candidateId?.lastName || ''}`.trim()
+				return nameA.localeCompare(nameB, 'fr')
+			})
 		}
 
 		return result
@@ -2331,6 +2392,10 @@ function DashboardRec() {
 									<div>
 										<h2 className='text-xl font-black text-[#0d355b]'>Candidats par offre</h2>
 										<p className='mt-1 text-sm text-[#4f7191]'>Retrouvez les candidats qui ont postule a vos offres.</p>
+										<div className='mt-2 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-bold text-emerald-700'>
+											<span aria-hidden='true'>↘</span>
+											<span>Trie par score final (decroissant)</span>
+										</div>
 									</div>
 									<button
 										type='button'
@@ -2355,7 +2420,10 @@ function DashboardRec() {
 											<div key={group.offerId} className='overflow-hidden rounded-2xl border border-cyan-100 bg-white p-4 shadow-[0_0_0_1px_rgba(14,165,233,0.2),0_10px_24px_rgba(14,165,233,0.12)]'>
 												<div className='-mx-4 -mt-4 mb-3 h-1 bg-gradient-to-r from-[#06b6d4] via-[#0ea5e9] to-[#1d4ed8]' />
 												<div className='mb-3 flex items-center justify-between gap-2'>
-													<h3 className='text-base font-black text-[#103b62]'>{group.offerTitle}</h3>
+													<div>
+														<h3 className='text-base font-black text-[#103b62]'>{group.offerTitle}</h3>
+														<p className='mt-0.5 text-[11px] font-semibold text-[#4f7191]'>Top score: {group.topScore >= 0 ? `${Math.round(group.topScore)}/100` : '--/100'}</p>
+													</div>
 													<div className='flex items-center gap-2'>
 														<span className='rounded-full bg-cyan-100 px-2 py-1 text-[11px] font-semibold text-[#0a6a8f]'>
 															{group.items.length} candidature{group.items.length > 1 ? 's' : ''}
@@ -2373,7 +2441,7 @@ function DashboardRec() {
 												<div className='space-y-2'>
 													{group.items.map((candidacy) => {
 														const cand = candidacy?.candidateId || {}
-														const candidateId = typeof candidacy?.candidateId === 'string' ? candidacy?.candidateId : candidacy?.candidateId?._id
+														const candidateId = normalizeEntityId(candidacy?.candidateId)
 														const cvInfo = candidateId ? cvByCandidate[candidateId] : null
 																const extraction = candidateId ? cvExtractionByCandidate[candidateId] : null
 																const extractionSources = [
