@@ -6,6 +6,8 @@ const Recruiter = require('../models/Recruiter');
 const Candidate = require('../models/Candidate');
 const JobOffer  = require('../models/JobOffer');
 const Candidacy = require('../models/Candidacy');
+const TrainingPath = require('../models/TrainingPath');
+const TrainingApplication = require('../models/TrainingApplication');
 const mailer    = require('../utils/mailer');
 
 let AppFeedback = null;
@@ -26,6 +28,26 @@ async function sendAdminEmail({ to, subject, text }) {
     console.error('[admin email]', err.message)
     // never throw — email failure must not block the admin action
   }
+}
+
+async function loadTrainingCounts(trainingIds) {
+  if (!trainingIds.length) return new Map();
+  const counts = await TrainingApplication.aggregate([
+    { $match: { trainingPathId: { $in: trainingIds } } },
+    { $group: { _id: '$trainingPathId', count: { $sum: 1 } } },
+  ]);
+  return new Map(counts.map((entry) => [String(entry._id), entry.count]));
+}
+
+function normalizeTags(tags) {
+  if (Array.isArray(tags)) {
+    return tags.map((tag) => String(tag || '').trim()).filter(Boolean);
+  }
+  if (!tags) return [];
+  return String(tags)
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter(Boolean);
 }
 
 // ─── Auth guard ───────────────────────────────────────────────────────────────
@@ -78,12 +100,13 @@ router.post('/seed', async (req, res) => {
 router.get('/stats', requireAdmin, async (req, res) => {
   try {
     const [totalRecruiters, totalCandidates, totalOffers, totalCandidacies,
-      feedbackCount, avgFeedbackRaw, scoredCandidacies, recentRecruiters, recentCandidates] =
+      totalTrainings, feedbackCount, avgFeedbackRaw, scoredCandidacies, recentRecruiters, recentCandidates] =
       await Promise.all([
         Recruiter.countDocuments(),
         Candidate.countDocuments(),
         JobOffer.countDocuments(),
         Candidacy.countDocuments(),
+        TrainingPath.countDocuments(),
         AppFeedback ? AppFeedback.countDocuments() : Promise.resolve(0),
         AppFeedback ? AppFeedback.aggregate([{ $group: { _id: null, avg: { $avg: '$rating' } } }]) : Promise.resolve([]),
         Candidacy.countDocuments({ sbertScore: { $ne: null } }),
@@ -110,6 +133,7 @@ router.get('/stats', requireAdmin, async (req, res) => {
     return res.json({
       success: true,
       stats: { totalRecruiters, totalCandidates, totalOffers, totalCandidacies,
+        totalTrainings,
         feedbackCount, avgRating: avgFeedbackRaw[0]?.avg ? Number(avgFeedbackRaw[0].avg.toFixed(2)) : null,
         scoredCandidacies, trendLabels, trendValues, recentRecruiters, recentCandidates },
     });
@@ -284,6 +308,57 @@ router.put('/offers/:id', requireAdmin, async (req, res) => {
 router.delete('/offers/:id', requireAdmin, async (req, res) => {
   await JobOffer.findByIdAndDelete(req.params.id);
   return res.json({ success: true, message: 'Offre supprimée.' });
+});
+
+// ─── TRAININGS ───────────────────────────────────────────────────────────────
+
+router.get('/formations', requireAdmin, async (req, res) => {
+  const trainings = await TrainingPath.find().sort({ createdAt: -1 }).lean();
+  const counts = await loadTrainingCounts(trainings.map((training) => training._id));
+  const enriched = trainings.map((training) => ({
+    ...training,
+    applicationsCount: counts.get(String(training._id)) || 0,
+  }));
+  return res.json({ success: true, formations: enriched });
+});
+
+router.post('/formations', requireAdmin, async (req, res) => {
+  try {
+    const allowed = ['title', 'description', 'provider', 'category', 'level', 'duration', 'imageUrl', 'status'];
+    const updates = Object.fromEntries(Object.entries(req.body || {}).filter(([key]) => allowed.includes(key)));
+    updates.tags = normalizeTags(req.body?.tags);
+    updates.createdByAdminId = req.admin?._id || null;
+    if (updates.status === 'published' && !updates.publishedAt) {
+      updates.publishedAt = new Date();
+    }
+    const formation = await TrainingPath.create(updates);
+    return res.status(201).json({ success: true, formation: { ...formation.toObject(), applicationsCount: 0 } });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message || 'Erreur serveur.' });
+  }
+});
+
+router.put('/formations/:id', requireAdmin, async (req, res) => {
+  try {
+    const allowed = ['title', 'description', 'provider', 'category', 'level', 'duration', 'imageUrl', 'status'];
+    const updates = Object.fromEntries(Object.entries(req.body || {}).filter(([key]) => allowed.includes(key)));
+    updates.tags = normalizeTags(req.body?.tags);
+    if (updates.status === 'published') {
+      updates.publishedAt = updates.publishedAt || new Date();
+    }
+    const formation = await TrainingPath.findByIdAndUpdate(req.params.id, updates, { new: true }).lean();
+    if (!formation) return res.status(404).json({ success: false, message: 'Formation introuvable.' });
+    const count = await TrainingApplication.countDocuments({ trainingPathId: formation._id });
+    return res.json({ success: true, formation: { ...formation, applicationsCount: count } });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message || 'Erreur serveur.' });
+  }
+});
+
+router.delete('/formations/:id', requireAdmin, async (req, res) => {
+  await TrainingApplication.deleteMany({ trainingPathId: req.params.id });
+  await TrainingPath.findByIdAndDelete(req.params.id);
+  return res.json({ success: true, message: 'Formation supprimée.' });
 });
 
 // ─── CANDIDACIES ─────────────────────────────────────────────────────────────

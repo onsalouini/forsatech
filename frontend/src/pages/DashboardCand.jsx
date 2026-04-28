@@ -17,6 +17,7 @@ import {
 	DashboardCandAssistantView,
 	DashboardCandCandidaturesView,
 	DashboardCandInterviewsView,
+	DashboardCandFormationsView,
 	DashboardCandQuizModal,
 } from './dashboardCand/index'
 
@@ -130,6 +131,11 @@ function DashboardCand() {
 	const [appFeedbackError, setAppFeedbackError] = useState('')
 	const [appFeedbackSummary, setAppFeedbackSummary] = useState({ averageRating: null, totalFeedbacks: 0 })
 	const [appFeedbackOpen, setAppFeedbackOpen] = useState(false)
+	const [formations, setFormations] = useState([])
+	const [formationsLoading, setFormationsLoading] = useState(false)
+	const [formationsError, setFormationsError] = useState('')
+	const [formationsMessage, setFormationsMessage] = useState('')
+	const [formationApplyingId, setFormationApplyingId] = useState('')
 
 	const normalizedSuggestions = useMemo(() => normalizeSuggestionsPayload(suggestionsData), [suggestionsData])
 	const activeCvMeta = useMemo(() => cvHistory.find((x) => x?.isActive) || null, [cvHistory])
@@ -215,6 +221,37 @@ function DashboardCand() {
 		}
 
 		fetchAppFeedback()
+		return () => {
+			cancelled = true
+		}
+	}, [candidateId])
+
+	useEffect(() => {
+		if (!candidateId) return
+
+		let cancelled = false
+		setFormationsLoading(true)
+		setFormationsError('')
+
+		fetch(`${API_BASE}/formations?candidateId=${encodeURIComponent(candidateId)}`)
+			.then((response) => response.json().then((json) => ({ ok: response.ok, json })))
+			.then(({ ok, json }) => {
+				if (cancelled) return
+				if (!ok || !json?.success) {
+					throw new Error(json?.message || 'Impossible de charger les formations.')
+				}
+				setFormations(Array.isArray(json.formations) ? json.formations : [])
+			})
+			.catch((error) => {
+				if (!cancelled) {
+					setFormations([])
+					setFormationsError(String(error?.message || 'Erreur serveur.'))
+				}
+			})
+			.finally(() => {
+				if (!cancelled) setFormationsLoading(false)
+			})
+
 		return () => {
 			cancelled = true
 		}
@@ -338,6 +375,45 @@ function DashboardCand() {
 			setOfferHelpMessages((prev) => [...prev, { role: 'assistant', content: "Désolé, je n’ai pas pu répondre. Réessaie dans un instant." }])
 		} finally {
 			setOfferHelpLoading(false)
+		}
+	}
+
+	const handleApplyToFormation = async (formation) => {
+		const candidateIdValue = candidate?.id || candidate?._id
+		if (!candidateIdValue || !formation?._id || formationApplyingId) return
+
+		setFormationsError('')
+		setFormationsMessage('')
+		setFormationApplyingId(String(formation._id))
+		try {
+			const activeFormationCvId = activeCvId || selectedCvId || activeCvMeta?._id || ''
+			const res = await fetch(`${API_BASE}/formations/${formation._id}/apply`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					candidateId: candidateIdValue,
+					cvId: activeFormationCvId,
+				}),
+			})
+			const data = await res.json().catch(() => ({}))
+			if (!res.ok || !data?.success) {
+				throw new Error(data?.message || 'Impossible de postuler à cette formation.')
+			}
+			setFormations((prev) => prev.map((item) => {
+				if (String(item._id) !== String(formation._id)) return item
+				return {
+					...item,
+					isApplied: true,
+					applicationStatus: data?.application?.status || 'applied',
+					appliedAt: data?.application?.createdAt || new Date().toISOString(),
+					applicationsCount: Number(item.applicationsCount || 0) + 1,
+				}
+			}))
+			setFormationsMessage(data?.message || 'Votre candidature a bien été envoyée.')
+		} catch (error) {
+			setFormationsError(String(error?.message || 'Erreur serveur.'))
+		} finally {
+			setFormationApplyingId('')
 		}
 	}
 
@@ -465,7 +541,7 @@ function DashboardCand() {
 			},
 			{
 				title: 'Espace formation',
-				items: [{ key: 'formation', label: 'Formations' }],
+				items: [{ key: 'formation', label: 'Formations', count: formations.length }],
 			},
 			{
 				title: 'Compte',
@@ -476,7 +552,7 @@ function DashboardCand() {
 				],
 			},
 		],
-		[jobs.length, candidacies.length, candidateInterviews.length, dashboardStats, notificationsUnreadCount]
+		[jobs.length, candidacies.length, candidateInterviews.length, dashboardStats, notificationsUnreadCount, formations.length]
 	)
 
 	const loadCandidateInterviews = async (currentCandidateId) => {
@@ -1739,39 +1815,14 @@ function DashboardCand() {
 								passwordSaving={passwordSaving}
 							/>
 						) : selectedView === 'formation' ? (
-							<div className='mt-6'>
-								<div className='rounded-2xl border border-cyan-100 bg-white p-4 shadow-[0_14px_30px_rgba(2,132,199,0.1)]'>
-									<div className='grid gap-4 md:grid-cols-[320px_1fr]'>
-										<div className='h-52 w-full rounded-xl border-2 border-dashed border-cyan-300 bg-cyan-50/60 p-3'>
-											<img
-												src={assets.React}
-												alt='Formation React'
-												className='h-full w-full rounded-lg border border-cyan-200 object-cover'
-											/>
-										</div>
-										<div className='flex min-h-[208px] flex-col justify-between'>
-											<div>
-												<div className='inline-flex rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-semibold tracking-wide text-cyan-700'>
-													Formations
-												</div>
-												<h3 className='mt-3 text-2xl font-black text-[#0b3558]'>Apprendre les fondamentaux de React</h3>
-												<p className='mt-2 text-sm text-[#4f7191]'>Version francaise de Learn the fundamentals of React.</p>
-											</div>
-											<div className='mt-4 flex flex-wrap gap-3'>
-												<button
-													type='button'
-													className='rounded-xl bg-[#0b3558] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-95'
-												>
-													Voir la formation
-												</button>
-												<span className='inline-flex items-center rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600'>
-													Niveau: Debutant
-												</span>
-											</div>
-										</div>
-									</div>
-								</div>
-							</div>
+							<DashboardCandFormationsView
+								formations={formations}
+								loading={formationsLoading}
+								error={formationsError}
+								successMessage={formationsMessage}
+								applyingId={formationApplyingId}
+								onApply={handleApplyToFormation}
+							/>
 						) : selectedView === 'dashboard' ? (
 							<DashboardCandAnalyticsView
 								dashboardLoading={dashboardLoading}

@@ -5723,4 +5723,5 @@ connectDB().finally(() => {
 const scoreRouter = require('./routes/score');
 app.use('/api/score', scoreRouter);
 app.use('/api/admin', require('./routes/admin'));
+app.use('/api/formations', require('./routes/formations'));
 
