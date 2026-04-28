@@ -63,6 +63,41 @@ if (!fs.existsSync(cvUploadsDir)) {
 }
 app.use('/uploads/cv', express.static(cvUploadsDir));
 
+// Formations uploads (images + videos)
+const formationsUploadsDir = path.join(__dirname, 'uploads', 'formations');
+if (!fs.existsSync(formationsUploadsDir)) {
+  fs.mkdirSync(formationsUploadsDir, { recursive: true });
+}
+app.use('/uploads/formations', express.static(formationsUploadsDir));
+
+const formationsStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, formationsUploadsDir),
+  filename: (req, file, cb) => {
+    const safe = (file.originalname || 'file').replace(/[^\w.\-]+/g, '_');
+    cb(null, Date.now() + '-' + Math.round(Math.random() * 1e9) + '-' + safe);
+  },
+});
+const formationsUpload = multer({
+  storage: formationsStorage,
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB pour les vidéos
+  fileFilter: (req, file, cb) => {
+    if (/^(image|video)\//.test(file.mimetype)) cb(null, true);
+    else cb(new Error('Seuls les fichiers image ou vidéo sont autorisés.'));
+  },
+});
+
+app.post('/api/admin/formations/upload', formationsUpload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ success: false, message: 'Aucun fichier reçu.' });
+  const url = `/uploads/formations/${req.file.filename}`;
+  return res.json({
+    success: true,
+    url,
+    filename: req.file.filename,
+    mimetype: req.file.mimetype,
+    size: req.file.size,
+  });
+});
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, cvUploadsDir);
