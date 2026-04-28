@@ -3134,6 +3134,83 @@ app.get('/api/cv/extract/:candidateId', async (req, res) => {
   }
 });
 
+app.post('/api/cv/re-extract/:cvId', async (req, res) => {
+  try {
+    const { cvId } = req.params;
+
+    if (!cvId || !mongoose.Types.ObjectId.isValid(String(cvId))) {
+      return res.status(400).json({ success: false, message: 'cvId invalide.' });
+    }
+
+    const cv = await CV.findById(cvId);
+    if (!cv) {
+      return res.status(404).json({ success: false, message: 'CV introuvable.' });
+    }
+
+    const publicPath = String(cv?.uploadedFile?.path || '').trim();
+    if (!publicPath || !publicPath.startsWith('/uploads/cv/')) {
+      return res.status(400).json({ success: false, message: 'Ce CV n\'a pas de fichier uploadé.' });
+    }
+
+    const absPath = resolveUploadPublicPathToAbsPath(publicPath);
+    if (!fs.existsSync(absPath)) {
+      return res.status(404).json({ success: false, message: 'Fichier CV introuvable sur le serveur. Re-uploadez le CV.' });
+    }
+
+    const analyzerBaseUrl = (process.env.CV_ANALYZER_URL || 'http://127.0.0.1:8001').toString().replace(/\/+$/, '');
+    const timeoutMs = readIntEnv('CV_ANALYZER_TIMEOUT_MS', 90000, { min: 5000, max: 300000 });
+
+    const fileBuffer = await fs.promises.readFile(absPath);
+    const fileName = String(cv?.uploadedFile?.originalName || cv?.uploadedFile?.fileName || 'cv.pdf');
+    const mimeType = String(cv?.uploadedFile?.mimeType || 'application/octet-stream');
+
+    const form = new FormData();
+    form.append('file', new Blob([fileBuffer], { type: mimeType }), fileName);
+    form.append('translate', 'false');
+    form.append('target_lang', 'en');
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    const resp = await fetch(`${analyzerBaseUrl}/extract`, {
+      method: 'POST',
+      body: form,
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeout));
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const detail = data?.detail || data?.message || `Erreur analyse CV (${resp.status})`;
+      return res.status(502).json({ success: false, message: 'Service analyse CV en erreur.', error: String(detail) });
+    }
+
+    const localCvText = await extractTextFromBuffer(fileBuffer, mimeType, fileName);
+    const extractionToStore = buildStructuredCvExtraction(data, { fallbackText: localCvText });
+    await CV.findByIdAndUpdate(cvId, { $set: { extraction: extractionToStore } });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Extraction relancée et enregistrée.',
+      cvId: String(cvId),
+      storedCategories: extractionToStore.categories,
+      lastExtractedAt: extractionToStore.lastExtractedAt,
+    });
+  } catch (error) {
+    const msg = String(error?.message || 'Erreur serveur');
+    const causeCode = error?.cause?.code ? String(error.cause.code) : '';
+    const isConnRefused = causeCode === 'ECONNREFUSED' || msg.toLowerCase().includes('econnrefused');
+    if (isConnRefused) {
+      const analyzerBaseUrl = (process.env.CV_ANALYZER_URL || 'http://127.0.0.1:8001').toString().replace(/\/+$/, '');
+      return res.status(503).json({
+        success: false,
+        message: 'Service analyse CV non démarré.',
+        hint: `Démarrez le service Python puis réessayez. URL: ${analyzerBaseUrl}`,
+      });
+    }
+    return res.status(500).json({ success: false, message: 'Erreur serveur.', error: msg });
+  }
+});
+
 app.post('/api/cv/suggestions', async (req, res) => {
   try {
     const { candidateId } = req.body || {};

@@ -36,8 +36,8 @@ Pour demarrer le service FastAPI sur `http://127.0.0.1:8001` :
 
 ```powershell
 Set-Location e:\AIR\analyse-cv
-& ".\.venv\Scripts\python.exe" -m uvicorn api:app --host 127.0.0.1 --port 8001 --reload
-```
+& ".\.venv\Scripts\python.exe" -m uvicorn api:app --host 127.0.0.1 --port 8001 --
+```reload
 
 ## Format standard des resultats modele
 
