@@ -35,6 +35,8 @@ const CandidacyScore = require('./models/CandidacyScore');
 
 const DirectMessage = require('./models/DirectMessage'); 
 
+
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 const envCandidates = [
@@ -4852,6 +4854,64 @@ app.get('/api/interviews/candidate/:candidateId/reports', async (req, res) => {
   }
 });
 
+// ─── Feedback moderation ──────────────────────────────────────────────────────
+function moderateText(text) {
+  if (!text || !String(text).trim()) return { flagged: false }
+
+  const BAD_WORDS = [
+    // French
+    'merde', 'putain', 'connard', 'connasse', 'salope', 'enculé', 'enculer',
+    'fdp', 'fils de pute', 'ta gueule', 'va te faire', 'nique', 'niquer',
+    'batard', 'bâtard', 'conne', 'pute', 'bordel', 'chier',
+    'encule', 'branler', 'branleur', 'couille',
+    // Arabic transliterated
+    'kess', '7mar', 'hmar', 'zebi', 'zeb',
+    'sharmouta', 'charmuta', 'khara', 'khra', '5ra',
+    // English
+    'fuck', 'shit', 'bitch', 'asshole', 'bastard', 'cunt', 'dick',
+    'pussy', 'motherfucker', 'bullshit', 'shitty','fck'
+  ]
+
+  const normalized = String(text)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  const found = BAD_WORDS.find(word => {
+    const pattern = new RegExp(
+      `(^|\\s|\\b)${word.replace(/\s+/g, '\\s+')}(\\s|\\b|$)`, 'i'
+    )
+    return pattern.test(normalized)
+  })
+
+  return found ? { flagged: true } : { flagged: false }
+}
+
+async function sendModerationEmail(userId, userRole) {
+  try {
+    const user = userRole === 'recruiter'
+      ? await Recruiter.findById(userId).select('email firstName').lean()
+      : await Candidate.findById(userId).select('email firstName').lean()
+
+    if (!user?.email) return
+
+    const transporter = getMailerTransporter()
+    if (!transporter) return
+
+    await transporter.sendMail({
+      from: getFromAddress(),
+      to: user.email,
+      subject: '[AIR] Votre avis a été supprimé',
+      text: `Bonjour ${user.firstName || ''},\n\nVotre avis sur la plateforme AIR a été automatiquement supprimé car il contient du contenu inapproprié.\n\nNous vous invitons à soumettre un nouvel avis en respectant les règles de bonne conduite.\n\nL'équipe AIR`,
+    })
+  } catch (err) {
+    console.error('[moderation email]', err.message)
+  }
+}
+
 // Application feedback routes
 app.post('/api/app-feedback', async (req, res) => {
   try {
@@ -4870,6 +4930,19 @@ app.post('/api/app-feedback', async (req, res) => {
     if (!Number.isFinite(rating) || rating < 1 || rating > 5) {
       return res.status(400).json({ success: false, message: 'rating doit etre entre 1 et 5.' });
     }
+
+    // ── AI moderation ────────────────────────────────────────────────────────
+    if (comment) {
+      const moderationResult = moderateText(comment)
+      if (moderationResult.flagged) {
+        await sendModerationEmail(userId, userRole)
+        return res.status(400).json({
+          success: false,
+          message: 'Votre avis contient du contenu inapproprié et n\'a pas pu être publié. Un email vous a été envoyé.',
+        })
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────────
 
     const feedback = await AppFeedback.findOneAndUpdate(
       { userId, userRole },
@@ -4891,6 +4964,7 @@ app.post('/api/app-feedback', async (req, res) => {
     return res.status(500).json({ success: false, message: 'Erreur serveur enregistrement feedback.', error: error.message });
   }
 });
+
 
 app.get('/api/app-feedback/mine', async (req, res) => {
   try {
