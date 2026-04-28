@@ -6,6 +6,7 @@ const Candidate = require('../models/Candidate');
 const CV = require('../models/CV');
 const TrainingApplication = require('../models/TrainingApplication');
 const TrainingPath = require('../models/TrainingPath');
+const FormationAttempt = require('../models/FormationAttempt');
 
 async function loadFormationCounts(trainingIds) {
   if (!trainingIds.length) return new Map();
@@ -98,6 +99,87 @@ router.post('/:id/apply', async (req, res) => {
     });
   } catch (error) {
     console.error('[formations:apply]', error);
+    return res.status(500).json({ success: false, message: 'Erreur serveur.' });
+  }
+});
+
+router.post('/:id/sections/:sectionId/test/submit', async (req, res) => {
+  try {
+    const { id, sectionId } = req.params;
+    const { candidateId, answers = [], timeSpentSeconds = 0 } = req.body || {};
+
+    if (!candidateId) {
+      return res.status(400).json({ success: false, message: 'candidateId requis.' });
+    }
+
+    const formation = await TrainingPath.findById(id);
+    if (!formation) {
+      return res.status(404).json({ success: false, message: 'Formation introuvable.' });
+    }
+
+    const section = formation.sections?.id ? formation.sections.id(sectionId) : null;
+    if (!section || !section.test?.enabled) {
+      return res.status(404).json({ success: false, message: 'Test introuvable pour cette section.' });
+    }
+
+    const questions = section.test.questions || [];
+    const passingScore = Number(section.test.passingScore) || 50;
+
+    const evaluatedAnswers = questions.map((q, idx) => {
+      const submitted = (answers || []).find((a) => Number(a?.questionIndex) === idx);
+      const selectedIndex = submitted ? Number(submitted.selectedIndex) : -1;
+      const isCorrect = selectedIndex === Number(q.correctIndex);
+      return { questionIndex: idx, selectedIndex, isCorrect };
+    });
+
+    const correctCount = evaluatedAnswers.filter((a) => a.isCorrect).length;
+    const totalQuestions = questions.length;
+    const score = totalQuestions ? Math.round((correctCount / totalQuestions) * 100) : 0;
+    const passed = score >= passingScore;
+
+    const attempt = await FormationAttempt.create({
+      candidateId,
+      trainingPathId: id,
+      sectionId,
+      answers: evaluatedAnswers,
+      score,
+      correctCount,
+      totalQuestions,
+      timeSpentSeconds: Math.max(0, Number(timeSpentSeconds) || 0),
+      passed,
+      passingScore,
+    });
+
+    return res.status(201).json({
+      success: true,
+      attempt,
+      result: {
+        score,
+        correctCount,
+        totalQuestions,
+        passed,
+        passingScore,
+      },
+    });
+  } catch (error) {
+    console.error('[formations:submit-test]', error);
+    return res.status(500).json({ success: false, message: 'Erreur serveur.' });
+  }
+});
+
+router.get('/:id/sections/:sectionId/attempts/:candidateId', async (req, res) => {
+  try {
+    const { id, sectionId, candidateId } = req.params;
+    const attempts = await FormationAttempt.find({
+      trainingPathId: id,
+      sectionId,
+      candidateId,
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+    return res.json({ success: true, attempts });
+  } catch (error) {
+    console.error('[formations:attempts]', error);
     return res.status(500).json({ success: false, message: 'Erreur serveur.' });
   }
 });

@@ -322,11 +322,42 @@ router.get('/formations', requireAdmin, async (req, res) => {
   return res.json({ success: true, formations: enriched });
 });
 
+function normalizeSections(rawSections) {
+  if (!Array.isArray(rawSections)) return [];
+  return rawSections.map((section, idx) => {
+    const test = section?.test || {};
+    const questions = Array.isArray(test?.questions) ? test.questions : [];
+    return {
+      title: String(section?.title || '').trim(),
+      description: String(section?.description || '').trim(),
+      order: Number.isFinite(Number(section?.order)) ? Number(section.order) : idx,
+      videos: Array.isArray(section?.videos)
+        ? section.videos.map((video, vIdx) => ({
+            title: String(video?.title || '').trim(),
+            url: String(video?.url || '').trim(),
+            order: Number.isFinite(Number(video?.order)) ? Number(video.order) : vIdx,
+          }))
+        : [],
+      test: {
+        enabled: Boolean(test?.enabled),
+        passingScore: Math.max(0, Math.min(100, Number(test?.passingScore) || 50)),
+        timeLimitMinutes: Math.max(0, Number(test?.timeLimitMinutes) || 0),
+        questions: questions.map((q) => ({
+          question: String(q?.question || '').trim(),
+          options: Array.isArray(q?.options) ? q.options.map((o) => String(o || '').trim()) : [],
+          correctIndex: Math.max(0, Number(q?.correctIndex) || 0),
+        })),
+      },
+    };
+  });
+}
+
 router.post('/formations', requireAdmin, async (req, res) => {
   try {
     const allowed = ['title', 'description', 'provider', 'category', 'level', 'duration', 'imageUrl', 'status'];
     const updates = Object.fromEntries(Object.entries(req.body || {}).filter(([key]) => allowed.includes(key)));
     updates.tags = normalizeTags(req.body?.tags);
+    updates.sections = normalizeSections(req.body?.sections);
     updates.createdByAdminId = req.admin?._id || null;
     if (updates.status === 'published' && !updates.publishedAt) {
       updates.publishedAt = new Date();
@@ -343,6 +374,9 @@ router.put('/formations/:id', requireAdmin, async (req, res) => {
     const allowed = ['title', 'description', 'provider', 'category', 'level', 'duration', 'imageUrl', 'status'];
     const updates = Object.fromEntries(Object.entries(req.body || {}).filter(([key]) => allowed.includes(key)));
     updates.tags = normalizeTags(req.body?.tags);
+    if (req.body?.sections !== undefined) {
+      updates.sections = normalizeSections(req.body?.sections);
+    }
     if (updates.status === 'published') {
       updates.publishedAt = updates.publishedAt || new Date();
     }

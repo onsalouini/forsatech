@@ -1882,6 +1882,7 @@ function DashboardCand() {
 								successMessage={formationsMessage}
 								applyingId={formationApplyingId}
 								onApply={handleApplyToFormation}
+								candidateId={candidateId}
 							/>
 						) : selectedView === 'dashboard' ? (
 							<DashboardCandAnalyticsView
