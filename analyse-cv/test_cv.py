@@ -157,7 +157,7 @@ def rule_based_extras(text, existing_ents):
                     and candidate.lower() not in existing_labels.get("Designation", set())
                     and not any(d.lower() == candidate.lower() for d in KNOWN_DESIGNATIONS)
                     # Filter out descriptions / sentences
-                    and " " not in candidate or candidate[0].isupper()
+                    and (" " not in candidate or (candidate and candidate[0].isupper()))
                     and not any(w in candidate.lower() for w in [
                         "project", "page", "design", "module", "interface",
                         "chatbot", "application", "website", "dashboard",

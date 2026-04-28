@@ -230,6 +230,7 @@ function DashboardRec() {
 	const [cvExtractionErrorByCandidate, setCvExtractionErrorByCandidate] = useState({})
 	const [scoresByOffer, setScoresByOffer] = useState({})
 	const [scoresLoadingByOffer, setScoresLoadingByOffer] = useState({})
+	const [deletingCandidacyId, setDeletingCandidacyId] = useState(null)
 	const [quizReviewState, setQuizReviewState] = useState({
 		open: false,
 		candidateName: '',
@@ -522,6 +523,22 @@ function DashboardRec() {
 			}))
 		} finally {
 			setCvExtractionLoadingByCandidate((prev) => ({ ...prev, [candidateId]: false }))
+		}
+	}
+
+	const handleDeleteCandidacy = async (candidacyId) => {
+		if (!candidacyId) return
+		setDeletingCandidacyId(candidacyId)
+		try {
+			const res = await fetch(`${API_BASE}/candidacies/${candidacyId}`, { method: 'DELETE' })
+			const data = await res.json().catch(() => ({}))
+			if (res.ok && data?.success) {
+				setCandidacies((prev) => prev.filter((c) => String(c._id) !== String(candidacyId)))
+			}
+		} catch {
+			// silent
+		} finally {
+			setDeletingCandidacyId(null)
 		}
 	}
 
@@ -2506,15 +2523,24 @@ function DashboardRec() {
 																})()}
 																<div className='flex flex-wrap items-start justify-between gap-2'>
 																	<p className='text-sm font-bold text-[#103b62]'>{fullName}</p>
-																	<button
-																		type='button'
-																		onClick={() => handlePrefillInterview(group.offerId, candidateId, fullName, cand.email || '')}
-																		className='rounded-md border border-cyan-300 bg-white px-2 py-1 text-xs font-semibold text-[#0a5f88] transition hover:bg-cyan-50'
-																	>
-																		Donner rendez-vous
-																	</button>
+																	<div className='flex items-center gap-2'>
+																		<button
+																			type='button'
+																			onClick={() => handlePrefillInterview(group.offerId, candidateId, fullName, cand.email || '')}
+																			className='rounded-md border border-cyan-300 bg-white px-2 py-1 text-xs font-semibold text-[#0a5f88] transition hover:bg-cyan-50'
+																		>
+																			Donner rendez-vous
+																		</button>
+																		<button
+																			type='button'
+																			disabled={deletingCandidacyId === String(candidacy._id)}
+																			onClick={() => handleDeleteCandidacy(String(candidacy._id))}
+																			className='rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-600 transition hover:bg-rose-100 disabled:opacity-50'
+																		>
+																			{deletingCandidacyId === String(candidacy._id) ? 'Suppression...' : 'Supprimer'}
+																		</button>
+																	</div>
 																</div>
-															
 																<p className='mt-1 text-xs text-[#587a99]'>
 																	{cand.email || 'Email non renseigne'}
 																	{cand.professionalTitle ? ` - ${cand.professionalTitle}` : ''}

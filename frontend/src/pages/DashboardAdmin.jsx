@@ -115,6 +115,7 @@ export default function DashboardAdmin() {
   const [candidates, setCandidates]     = useState([])
   const [offers, setOffers]             = useState([])
   const [candidacies, setCandidacies]   = useState([])
+  const [formations, setFormations]     = useState([])
   const [feedbacks, setFeedbacks]       = useState([])
   const [loading, setLoading]           = useState(false)
   const [error, setError]               = useState('')
@@ -167,6 +168,7 @@ export default function DashboardAdmin() {
       recruiters:  () => apiFetch('/recruiters').then(d => setRecruiters(d.recruiters)),
       candidates:  () => apiFetch('/candidates').then(d => setCandidates(d.candidates)),
       offers:      () => apiFetch('/offers').then(d => setOffers(d.offers)),
+      formations:  () => apiFetch('/formations').then(d => setFormations(d.formations)),
       candidacies: () => apiFetch('/candidacies').then(d => setCandidacies(d.candidacies)),
       feedback:    () => apiFetch('/feedback').then(d => setFeedbacks(d.feedbacks)),
     }
@@ -218,10 +220,18 @@ export default function DashboardAdmin() {
   const handleEditSave = async (type, id) => {
     setSaving(true)
     try {
-      const data = await apiFetch(`/${type}/${id}`, { method: 'PUT', body: JSON.stringify(editForm) })
-      const keyMap = { recruiters: 'recruiter', candidates: 'candidate', offers: 'offer' }
-      const setterMap = { recruiters: setRecruiters, candidates: setCandidates, offers: setOffers }
-      setterMap[type](prev => prev.map(x => x._id === id ? { ...x, ...(data[keyMap[type]] || editForm) } : x))
+      const isFormation = type === 'formations'
+      const endpoint = isFormation ? (id ? `/${type}/${id}` : `/${type}`) : `/${type}/${id}`
+      const method = isFormation && !id ? 'POST' : 'PUT'
+      const data = await apiFetch(endpoint, { method, body: JSON.stringify(editForm) })
+      const keyMap = { recruiters: 'recruiter', candidates: 'candidate', offers: 'offer', formations: 'formation' }
+      const setterMap = { recruiters: setRecruiters, candidates: setCandidates, offers: setOffers, formations: setFormations }
+      const nextItem = data[keyMap[type]] || editForm
+      if (isFormation && !id) {
+        setterMap[type](prev => [nextItem, ...prev])
+      } else {
+        setterMap[type](prev => prev.map(x => x._id === (id || nextItem._id) ? { ...x, ...nextItem } : x))
+      }
       flash('Modifications enregistrées.')
       setModal(null)
     } catch (e) { flash(e.message, true) }
@@ -229,6 +239,20 @@ export default function DashboardAdmin() {
   }
 
   const openEdit = (type, item) => { setEditForm({ ...item }); setModal({ type: `edit-${type}`, data: item }) }
+  const openFormationCreate = () => {
+    setEditForm({
+      title: '',
+      description: '',
+      provider: 'A.I.R',
+      category: '',
+      level: 'beginner',
+      duration: '',
+      imageUrl: '',
+      tags: '',
+      status: 'published',
+    })
+    setModal({ type: 'edit-formations', data: null })
+  }
   const openWarn = (type, item) => { setWarningMsg(''); setModal({ type: `warn-${type}`, data: item }) }
 
   const adminName = admin ? `${admin.firstName || ''} ${admin.lastName || ''}`.trim() || admin.email : ''
@@ -591,11 +615,50 @@ export default function DashboardAdmin() {
             )}
           </div>
           {view === 'formations' && !loading && (
-  <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
-    <p className="text-lg font-black text-[#0d355b]">Formations</p>
-    <p className="mt-2 text-sm text-[#8aa3b9]">Cette section est en cours de développement.</p>
-  </div>
-)}
+            <div className="mt-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-lg font-black text-[#0d355b]">Formations</p>
+                  <p className="mt-1 text-sm text-[#8aa3b9]">Créez les parcours visibles par les candidats et suivez les inscriptions.</p>
+                </div>
+                <button onClick={openFormationCreate} className="rounded-xl bg-gradient-to-r from-[#0ea5e9] to-[#1d4ed8] px-4 py-2 text-sm font-semibold text-white hover:brightness-110">
+                  Nouvelle formation
+                </button>
+              </div>
+
+              <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+                <table className="w-full text-left text-sm">
+                  <thead className="border-b border-slate-200 bg-slate-50">
+                    <tr><TH>Titre</TH><TH>Catégorie</TH><TH>Niveau</TH><TH>Statut</TH><TH>Candidats</TH><TH>Créée</TH><TH>Actions</TH></tr>
+                  </thead>
+                  <tbody>
+                    {filtered(formations, ['title', 'provider', 'category']).map(f => (
+                      <tr key={f._id} className="border-b border-slate-100 hover:bg-slate-50/70">
+                        <td className="px-4 py-3 font-semibold text-[#103b62]">
+                          <p>{f.title || '—'}</p>
+                          <p className="mt-1 max-w-md truncate text-xs text-[#8aa3b9]">{f.provider || 'A.I.R'}</p>
+                        </td>
+                        <td className="px-4 py-3 text-[#587a99]">{f.category || '—'}</td>
+                        <td className="px-4 py-3 text-[#587a99]">{f.level || '—'}</td>
+                        <td className="px-4 py-3"><Badge label={f.status || '—'} color={f.status === 'published' ? 'green' : 'slate'} /></td>
+                        <td className="px-4 py-3 text-[#587a99]">{f.applicationsCount ?? 0}</td>
+                        <td className="px-4 py-3 text-[#587a99]">{fmt(f.createdAt)}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1.5">
+                            <button onClick={() => openEdit('formations', { ...f, tags: Array.isArray(f.tags) ? f.tags.join(', ') : f.tags || '' })} className="rounded-md border border-cyan-300 bg-white px-2 py-1 text-xs font-semibold text-[#0a5f88] hover:bg-cyan-50">Modifier</button>
+                            <button onClick={() => handleDelete('/formations', f._id, setFormations)} className="rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100">Supprimer</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {!filtered(formations, ['title', 'provider', 'category']).length && (
+                      <tr><td colSpan={7} className="px-4 py-8 text-center text-sm text-[#8aa3b9]">Aucune formation.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </main>
       </div>
 
@@ -672,6 +735,66 @@ export default function DashboardAdmin() {
             <button onClick={() => handleEditSave('offers', modal.data._id)} disabled={saving}
               className="mt-2 w-full rounded-xl bg-gradient-to-r from-[#0ea5e9] to-[#1d4ed8] py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-60">
               {saving ? 'Enregistrement...' : 'Enregistrer les modifications'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {modal?.type === 'edit-formations' && (
+        <Modal title={modal.data?._id ? 'Modifier la formation' : 'Créer une formation'} onClose={() => setModal(null)}>
+          <div className="space-y-3">
+            {[
+              ['Titre', 'title'],
+              ['Organisme', 'provider'],
+              ['Catégorie', 'category'],
+              ['Durée', 'duration'],
+              ['Image URL', 'imageUrl'],
+              ['Tags (séparés par des virgules)', 'tags'],
+            ].map(([label, key]) => (
+              <div key={key}>
+                <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-[#4f7191]">{label}</label>
+                <input
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-cyan-500"
+                  value={editForm[key] || ''}
+                  onChange={e => setEditForm(p => ({ ...p, [key]: e.target.value }))}
+                />
+              </div>
+            ))}
+            <div>
+              <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-[#4f7191]">Niveau</label>
+              <select
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-cyan-500"
+                value={editForm.level || 'beginner'}
+                onChange={e => setEditForm(p => ({ ...p, level: e.target.value }))}
+              >
+                <option value="beginner">Débutant</option>
+                <option value="intermediate">Intermédiaire</option>
+                <option value="advanced">Avancé</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-[#4f7191]">Statut</label>
+              <select
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-cyan-500"
+                value={editForm.status || 'published'}
+                onChange={e => setEditForm(p => ({ ...p, status: e.target.value }))}
+              >
+                <option value="published">Publiée</option>
+                <option value="draft">Brouillon</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-[#4f7191]">Description</label>
+              <textarea
+                rows={5}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-cyan-500"
+                value={editForm.description || ''}
+                onChange={e => setEditForm(p => ({ ...p, description: e.target.value }))}
+              />
+            </div>
+            <button onClick={() => handleEditSave('formations', modal.data?._id)} disabled={saving}
+              className="mt-2 w-full rounded-xl bg-gradient-to-r from-[#0ea5e9] to-[#1d4ed8] py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-60">
+              {saving ? 'Enregistrement...' : 'Enregistrer la formation'}
             </button>
           </div>
         </Modal>
