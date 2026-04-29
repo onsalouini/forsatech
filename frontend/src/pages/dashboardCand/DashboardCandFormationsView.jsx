@@ -465,8 +465,8 @@ export function DashboardCandFormationsView({
 				<div className='flex flex-wrap items-center justify-between gap-3 border-b border-[#0d355b]/10 bg-white/70 px-5 py-4 backdrop-blur'>
 					<div>
 						<p className='text-xs font-black tracking-[0.14em] text-[#5c7fa1] uppercase'>Espace formation</p>
-						<h2 className='mt-1 text-2xl font-black text-[#0d355b]'>Formations proposées par l&apos;administration</h2>
-						<p className='mt-1 text-sm text-[#547896]'>Choisissez une formation et lancez-vous directement depuis votre espace candidat.</p>
+						<h2 className='mt-1 text-2xl font-black text-[#0d355b]'>Formations Disponibles</h2>
+						<p className='mt-1 text-sm text-[#547896]'>Explorez nos formations et développez vos compétences.</p>
 					</div>
 					<Badge variant='cyan'>{formations.length} formation(s)</Badge>
 				</div>
