@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+﻿/* eslint-disable react/prop-types */
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { assets } from '../assets/assets'
@@ -106,7 +106,7 @@ function DashboardCand() {
 
 	const [assistantChatId, setAssistantChatId] = useState(null)
 	const [assistantMessages, setAssistantMessages] = useState(() => [
-		{ role: 'assistant', content: "Bonjour, je suis l’Assistant IA d’A.I.R. Pose-moi tes questions sur ton CV, ta candidature, ou la préparation d’entretien." },
+		{ role: 'assistant', content: "Bonjour, je suis l’Assistant IA d’ForsaTech. Pose-moi tes questions sur ton CV, ta candidature, ou la préparation d’entretien." },
 	])
 	const [assistantInput, setAssistantInput] = useState('')
 	const [assistantFile, setAssistantFile] = useState(null)
@@ -439,7 +439,7 @@ function DashboardCand() {
 		setAssistantChatId(null)
 		setOfferHelpChatId(null)
 		setAssistantMessages([
-			{ role: 'assistant', content: "Bonjour, je suis l’Assistant IA d’A.I.R. Pose-moi tes questions sur ton CV, ta candidature, ou la préparation d’entretien." },
+			{ role: 'assistant', content: "Bonjour, je suis l’Assistant IA d’ForsaTech. Pose-moi tes questions sur ton CV, ta candidature, ou la préparation d’entretien." },
 		])
 		setOfferHelpMessages([
 			{ role: 'assistant', content: "Bonjour. Sélectionne une offre puis je t’aide à adapter ta candidature et te préparer à l’entretien." },

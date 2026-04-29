@@ -51,7 +51,7 @@ function Hero() {
           </div>
 
           <p style={{ fontFamily: "'Jost', sans-serif" }} className='text-slate-100 text-base sm:text-lg mb-8 max-w-xl'>
-           A.I.R connecte intelligemment candidats et recruteurs grâce à une analyse IA avancée des CV et des offres d'emploi.
+           ForsaTech connecte intelligemment candidats et recruteurs grâce à une analyse IA avancée des CV et des offres d'emploi.
           </p>
           <div className='flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4'>
             <button

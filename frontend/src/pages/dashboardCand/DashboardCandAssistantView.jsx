@@ -1,4 +1,4 @@
-/* eslint-disable react/prop-types */
+﻿/* eslint-disable react/prop-types */
 import React from 'react'
 
 export function DashboardCandAssistantView({
@@ -29,7 +29,7 @@ export function DashboardCandAssistantView({
 					onClick={() => {
 						setAssistantChatId(null)
 						setAssistantMessages([
-							{ role: 'assistant', content: "Bonjour, je suis l’Assistant IA d’A.I.R. Pose-moi tes questions sur ton CV, ta candidature, ou la préparation d’entretien." },
+							{ role: 'assistant', content: "Bonjour, je suis l’Assistant IA d’ForsaTech. Pose-moi tes questions sur ton CV, ta candidature, ou la préparation d’entretien." },
 						])
 						setAssistantError('')
 						setAssistantFile(null)

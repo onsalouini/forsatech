@@ -1,4 +1,4 @@
-// backend/routes/admin.js
+﻿// backend/routes/admin.js
 const express = require('express');
 const router  = express.Router();
 const Admin     = require('../models/Admin');
@@ -168,8 +168,8 @@ router.post('/recruiters/:id/ban', requireAdmin, async (req, res) => {
     if (!recruiter) return res.status(404).json({ success: false, message: 'Recruteur introuvable.' });
     await sendAdminEmail({
       to: recruiter.email,
-      subject: '[AIR] Votre compte a été suspendu',
-      text: `Bonjour ${recruiter.firstName},\n\nVotre compte recruteur a été suspendu.\nMotif: ${reason}\n\nPour contester cette décision, contactez notre support.\n\nL'équipe AIR`,
+      subject: '[ForsaTech] Votre compte a été suspendu',
+      text: `Bonjour ${recruiter.firstName},\n\nVotre compte recruteur a été suspendu.\nMotif: ${reason}\n\nPour contester cette décision, contactez notre support.\n\nL'Équipe ForsaTech`,
     });
     return res.json({ success: true, message: 'Recruteur banni.', banReason: reason });
   } catch (err) {
@@ -183,8 +183,8 @@ router.post('/recruiters/:id/unban', requireAdmin, async (req, res) => {
     if (!recruiter) return res.status(404).json({ success: false, message: 'Recruteur introuvable.' });
     await sendAdminEmail({
       to: recruiter.email,
-      subject: '[AIR] Votre compte a été réactivé',
-      text: `Bonjour ${recruiter.firstName},\n\nVotre compte recruteur a été réactivé. Vous pouvez à nouveau vous connecter.\n\nL'équipe AIR`,
+      subject: '[ForsaTech] Votre compte a été réactivé',
+      text: `Bonjour ${recruiter.firstName},\n\nVotre compte recruteur a été réactivé. Vous pouvez à nouveau vous connecter.\n\nL'Équipe ForsaTech`,
     });
     return res.json({ success: true, message: 'Recruteur débanni.' });
   } catch (err) {
@@ -200,8 +200,8 @@ router.post('/recruiters/:id/warning', requireAdmin, async (req, res) => {
     if (!recruiter) return res.status(404).json({ success: false, message: 'Recruteur introuvable.' });
     await sendAdminEmail({
       to: recruiter.email,
-      subject: '[AIR] Avertissement officiel',
-      text: `Bonjour ${recruiter.firstName},\n\nVous recevez cet avertissement de la part de l'équipe AIR :\n\n"${message}"\n\nVeuillez vous conformer à nos conditions d'utilisation pour éviter la suspension de votre compte.\n\nL'équipe AIR`,
+      subject: '[ForsaTech] Avertissement officiel',
+      text: `Bonjour ${recruiter.firstName},\n\nVous recevez cet avertissement de la part de l'Équipe ForsaTech :\n\n"${message}"\n\nVeuillez vous conformer à nos conditions d'utilisation pour éviter la suspension de votre compte.\n\nL'Équipe ForsaTech`,
     });
     return res.json({ success: true, message: 'Avertissement envoyé.' });
   } catch (err) {
@@ -240,8 +240,8 @@ router.post('/candidates/:id/ban', requireAdmin, async (req, res) => {
     if (!candidate) return res.status(404).json({ success: false, message: 'Candidat introuvable.' });
     await sendAdminEmail({
       to: candidate.email,
-      subject: '[AIR] Votre compte a été suspendu',
-      text: `Bonjour ${candidate.firstName},\n\nVotre compte candidat a été suspendu.\nMotif: ${reason}\n\nPour contester cette décision, contactez notre support.\n\nL'équipe AIR`,
+      subject: '[ForsaTech] Votre compte a été suspendu',
+      text: `Bonjour ${candidate.firstName},\n\nVotre compte candidat a été suspendu.\nMotif: ${reason}\n\nPour contester cette décision, contactez notre support.\n\nL'Équipe ForsaTech`,
     });
     return res.json({ success: true, message: 'Candidat banni.' });
   } catch (err) {
@@ -255,8 +255,8 @@ router.post('/candidates/:id/unban', requireAdmin, async (req, res) => {
     if (!candidate) return res.status(404).json({ success: false, message: 'Candidat introuvable.' });
     await sendAdminEmail({
       to: candidate.email,
-      subject: '[AIR] Votre compte a été réactivé',
-      text: `Bonjour ${candidate.firstName},\n\nVotre compte candidat a été réactivé.\n\nL'équipe AIR`,
+      subject: '[ForsaTech] Votre compte a été réactivé',
+      text: `Bonjour ${candidate.firstName},\n\nVotre compte candidat a été réactivé.\n\nL'Équipe ForsaTech`,
     });
     return res.json({ success: true, message: 'Candidat débanni.' });
   } catch (err) {
@@ -272,8 +272,8 @@ router.post('/candidates/:id/warning', requireAdmin, async (req, res) => {
     if (!candidate) return res.status(404).json({ success: false, message: 'Candidat introuvable.' });
     await sendAdminEmail({
       to: candidate.email,
-      subject: '[AIR] Avertissement officiel',
-      text: `Bonjour ${candidate.firstName},\n\nVous recevez cet avertissement de la part de l'équipe AIR :\n\n"${message}"\n\nVeuillez vous conformer à nos conditions d'utilisation.\n\nL'équipe AIR`,
+      subject: '[ForsaTech] Avertissement officiel',
+      text: `Bonjour ${candidate.firstName},\n\nVous recevez cet avertissement de la part de l'Équipe ForsaTech :\n\n"${message}"\n\nVeuillez vous conformer à nos conditions d'utilisation.\n\nL'Équipe ForsaTech`,
     });
     return res.json({ success: true, message: 'Avertissement envoyé.' });
   } catch (err) {

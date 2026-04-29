@@ -386,7 +386,7 @@ function CnnxRec() {
 									<form onSubmit={handleSignupSubmit} className='space-y-4'>
                                         <p  style={{ fontFamily: "'Jost', sans-serif" }} className='text-4xl font-black text-[#000000]'>Créer un compte 🚀</p>
 
-<h1  style={{ fontFamily: "'Jost', sans-serif" }} className='text-xl font-black text-[#000000]'>Rejoignez A.I.R et recrutez plus intelligemment
+<h1  style={{ fontFamily: "'Jost', sans-serif" }} className='text-xl font-black text-[#000000]'>Rejoignez ForsaTech et recrutez plus intelligemment
 </h1>
 										<div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
                                             

@@ -1,4 +1,4 @@
-const { getMailerTransporter, getFromAddress } = require('../utils/mailer')
+﻿const { getMailerTransporter, getFromAddress } = require('../utils/mailer')
 
 async function test() {
   const transporter = getMailerTransporter()
@@ -11,7 +11,7 @@ async function test() {
     const result = await transporter.sendMail({
       from: getFromAddress(),
       to: 'onsalouini5@gmail.com', // send to yourself
-      subject: 'Test AIR mailer',
+      subject: 'Test ForsaTech mailer',
       text: 'If you see this, mailer works.',
     })
     console.log('Sent:', result.messageId)

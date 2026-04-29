@@ -72,7 +72,7 @@ function FormationCard({ formation, onStart, onApply, applying }) {
 
 			<div className='flex flex-1 flex-col gap-3 p-5'>
 				<div>
-					<p className='text-[10px] font-black uppercase tracking-[0.14em] text-[#5d7d98]'>{formation.provider || 'A.I.R'}</p>
+					<p className='text-[10px] font-black uppercase tracking-[0.14em] text-[#5d7d98]'>{formation.provider || 'ForsaTech'}</p>
 					<h3 className='mt-1 line-clamp-2 text-lg font-black text-[#0d355b]'>{formation.title}</h3>
 				</div>
 				<p className='line-clamp-3 text-sm leading-6 text-[#587a99]'>{formation.description}</p>
@@ -174,7 +174,7 @@ function CoursePlayer({ formation, candidateId, onClose }) {
 			{/* Top bar */}
 			<header className='flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-[#0a1525] px-5 py-3'>
 				<div className='min-w-0'>
-					<p className='text-[10px] font-black uppercase tracking-[0.16em] text-cyan-300/80'>{formation.provider || 'A.I.R'}</p>
+					<p className='text-[10px] font-black uppercase tracking-[0.16em] text-cyan-300/80'>{formation.provider || 'ForsaTech'}</p>
 					<h2 className='truncate text-base font-black md:text-lg'>{formation.title}</h2>
 				</div>
 				<div className='flex items-center gap-3'>

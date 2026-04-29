@@ -1301,7 +1301,7 @@ function DashboardRec() {
 		const raw = String(meetingLink || '').trim()
 		if (!raw) return
 		const normalizedLink = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
-		const displayName = `${recruiter?.firstName || ''} ${recruiter?.lastName || ''}`.trim() || recruiter?.company || 'Recruteur AIR'
+		const displayName = `${recruiter?.firstName || ''} ${recruiter?.lastName || ''}`.trim() || recruiter?.company || 'Recruteur ForsaTech'
 		const interviewQuery = interviewId ? `&interviewId=${encodeURIComponent(interviewId)}` : ''
 		navigate(`/meet?url=${encodeURIComponent(normalizedLink)}&name=${encodeURIComponent(displayName)}&role=recruteur${interviewQuery}`)
 	}
@@ -1941,7 +1941,7 @@ function DashboardRec() {
 							className='cursor-pointer'
 							aria-label='Aller a l accueil'
 						>
-							<img src={assets.logo} alt='AIR logo' className='h-28 w-auto object-contain' />
+							<img src={assets.logo} alt='ForsaTech logo' className='h-28 w-auto object-contain' />
 						</button>
 					</div>
 
@@ -2980,7 +2980,7 @@ function DashboardRec() {
 																				onClick={() => handleJoinInterview(it.meetingLink, it.id)}
 																				className='mt-1 inline-flex max-w-full items-center rounded-md bg-cyan-50 px-2 py-1 text-xs font-semibold text-[#0a5f88] hover:bg-cyan-100'
 																			>
-																				Rejoindre dans AIR
+																				Rejoindre dans ForsaTech
 																			</button>
 																		) : (
 																			<p className='mt-1 text-xs text-[#355978]'>{it.location || 'Non defini'}</p>
@@ -3434,8 +3434,8 @@ function DashboardRec() {
 						<button
 							type='button'
 							onClick={() => setAppFeedbackOpen((prev) => !prev)}
-							aria-label='Ouvrir le feedback AIR'
-							title='Feedback AIR'
+							aria-label='Ouvrir le feedback ForsaTech'
+							title='Feedback ForsaTech'
 							className='flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-r from-[#0ea5e9] to-[#1d4ed8] text-lg font-black text-white shadow-xl transition hover:brightness-110'
 						>
 							★
