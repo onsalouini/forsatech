@@ -57,7 +57,7 @@ const trainingPathSchema = new mongoose.Schema(
 		},
 		provider: {
 			type: String,
-			default: 'A.I.R',
+			default: 'ForsaTech',
 			trim: true,
 		},
 		category: {

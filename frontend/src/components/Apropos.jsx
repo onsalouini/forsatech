@@ -27,7 +27,7 @@ function Apropos() {
             style={{ fontFamily: "'Jost', sans-serif" }}
             className='mx-auto max-w-3xl text-lg sm:text-xl text-slate-600 leading-relaxed font-light'
           >
-            A.I.R connecte les bons profils aux bonnes opportunités grâce à l'IA:
+            ForsaTech connecte les bons profils aux bonnes opportunités grâce à l'IA:
             Une plateforme complète qui transforme votre façon de recruter ou de chercher un emploi.
           </p>
         </div>
@@ -219,7 +219,7 @@ Tests de stress, d'humeur et de personnalité pour mieux vous connaître et rass
               style={{ fontFamily: "'Jost', sans-serif" }}
               className='mx-auto max-w-2xl text-base sm:text-lg text-slate-600 leading-relaxed'
             >
-              A.I.R est conçu pour les deux côtés du recrutement.
+              ForsaTech est conçu pour les deux côtés du recrutement.
             </p>
           </div>
 
@@ -282,13 +282,13 @@ Tests de stress, d'humeur et de personnalité pour mieux vous connaître et rass
             style={{ fontFamily: "'Jost', sans-serif" }}
             className='text-sm sm:text-2xl font-bold uppercase tracking-[0.3em] text-[#06d5e0] px-4 py-2 rounded-full mb-4'
           >
-            Rejoignez A.I.R
+            Rejoignez ForsaTech
           </p>
           <h2 style={{ fontFamily: "'Anton', sans-serif" }} className='text-3xl sm:text-5xl lg:text-5xl font-black text-white mb-6'>
             Prêt à transformer votre recrutement ?
           </h2>
           <p style={{ fontFamily: "'Jost', sans-serif" }} className='mx-auto max-w-2xl text-base sm:text-lg text-slate-200 mb-8 font-light'>
-            Rejoignez les professionnels qui font confiance à A.I.R pour trouver les meilleurs talents et se faire découvrir.
+            Rejoignez les professionnels qui font confiance à ForsaTech pour trouver les meilleurs talents et se faire découvrir.
           </p>
           <button
             onClick={() => navigate('/demarrer')}

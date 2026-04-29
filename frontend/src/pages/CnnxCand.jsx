@@ -256,7 +256,7 @@ function CnnxCand() {
 							</h1>
 
 							<p className='mt-4 text-slate-200/90 text-sm sm:text-base leading-relaxed'>
-								Créez votre profil, partagez vos informations et laissez A.I.R vous proposer les offres les plus pertinentes.
+								Créez votre profil, partagez vos informations et laissez ForsaTech vous proposer les offres les plus pertinentes.
 							</p>
 
 							<div className='mt-8 space-y-3'>
@@ -393,7 +393,7 @@ function CnnxCand() {
 								) : (
 									<form onSubmit={handleSignupSubmit} className='space-y-4'>
 										<p style={{ fontFamily: "'Jost', sans-serif" }} className='text-4xl font-black text-[#000000]'>Creer un compte 🚀</p>
-										<h1 style={{ fontFamily: "'Jost', sans-serif" }} className='text-xl font-black text-[#000000]'>Rejoignez A.I.R et postulez plus intelligemment</h1>
+										<h1 style={{ fontFamily: "'Jost', sans-serif" }} className='text-xl font-black text-[#000000]'>Rejoignez ForsaTech et postulez plus intelligemment</h1>
 
 										<div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
 											<div>

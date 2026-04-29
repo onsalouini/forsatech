@@ -488,7 +488,7 @@ function CandidateCVBuilder() {
 												<div className='mt-4 grid grid-cols-1 md:grid-cols-2 gap-4'>
 													<div>
 														<label className='block text-xs font-extrabold tracking-wider text-slate-600 uppercase'>Nom du projet *</label>
-														<input value={item.name || ''} onChange={(e) => updateItem('projects', idx, { name: e.target.value })} className='mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-cyan-600 focus:ring-4 focus:ring-cyan-600/20' placeholder='A.I.R — CV Scoring System' />
+														<input value={item.name || ''} onChange={(e) => updateItem('projects', idx, { name: e.target.value })} className='mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-cyan-600 focus:ring-4 focus:ring-cyan-600/20' placeholder='ForsaTech — CV Scoring System' />
 													</div>
 													<div>
 														<label className='block text-xs font-extrabold tracking-wider text-slate-600 uppercase'>Type</label>

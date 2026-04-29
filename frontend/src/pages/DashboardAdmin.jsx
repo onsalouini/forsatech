@@ -630,7 +630,7 @@ export default function DashboardAdmin() {
     setEditForm({
       title: '',
       description: '',
-      provider: 'A.I.R',
+      provider: 'ForsaTech',
       level: 'beginner',
       imageUrl: '',
       tags: '',
@@ -1427,7 +1427,7 @@ export default function DashboardAdmin() {
                       <tr key={f._id} className="border-b border-slate-100 hover:bg-slate-50/70">
                         <td className="px-4 py-3 font-semibold text-[#103b62]">
                           <p>{f.title || '—'}</p>
-                          <p className="mt-1 max-w-md truncate text-xs text-[#8aa3b9]">{f.provider || 'A.I.R'}</p>
+                          <p className="mt-1 max-w-md truncate text-xs text-[#8aa3b9]">{f.provider || 'ForsaTech'}</p>
                         </td>
                         <td className="px-4 py-3 text-[#587a99]">{f.level || '—'}</td>
                         <td className="px-4 py-3 text-[#587a99]">{Array.isArray(f.sections) ? f.sections.length : 0}</td>
