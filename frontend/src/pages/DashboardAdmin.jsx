@@ -9,6 +9,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { assets } from '../assets/assets'
+import { LineAreaChart, DonutChart, BarChart } from './dashboardCand/charts'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 const STATIC_BASE = API_BASE.replace(/\/api\/?$/, '')
@@ -389,6 +390,8 @@ export default function DashboardAdmin() {
 
   const [stats, setStats]               = useState(null)
   const [statsLoading, setStatsLoading] = useState(false)
+  const [globalAnalytics, setGlobalAnalytics] = useState(null)
+  const [globalAnalyticsLoading, setGlobalAnalyticsLoading] = useState(false)
   const [recruiters, setRecruiters]     = useState([])
   const [candidates, setCandidates]     = useState([])
   const [offers, setOffers]             = useState([])
@@ -437,6 +440,16 @@ export default function DashboardAdmin() {
     apiFetch('/stats').then(d => setStats(d.stats)).catch(e => flash(e.message, true)).finally(() => setStatsLoading(false))
   }, [admin, apiFetch, flash])
 
+  // Load global dashboard analytics only for the overview view
+  useEffect(() => {
+    if (!admin || view !== 'overview') return
+    setGlobalAnalyticsLoading(true)
+    apiFetch('/dashboard/global?days=30')
+      .then((d) => setGlobalAnalytics(d.globalAnalytics || null))
+      .catch((e) => flash(e.message, true))
+      .finally(() => setGlobalAnalyticsLoading(false))
+  }, [admin, view, apiFetch, flash])
+
   // Load section data on view change
   useEffect(() => {
     if (!admin || view === 'overview') return
@@ -454,6 +467,102 @@ export default function DashboardAdmin() {
   }, [view, admin]) // eslint-disable-line
 
   const fmt = (iso) => iso ? new Date(iso).toLocaleDateString('fr-FR') : '—'
+
+  const hourLabels = useMemo(() => (
+    Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}h`)
+  ), [])
+
+  const platformCandidate = globalAnalytics?.platformCandidate || null
+  const platformRecruiter = globalAnalytics?.platformRecruiter || null
+
+  const candidateConnectedSeries = useMemo(() => {
+    const points = platformCandidate?.sessions?.connectedHoursByDay || []
+    return points.map((d) => ({
+      label: String(d?.date || '').slice(5),
+      value: Number.isFinite(Number(d?.hours)) ? Number(d?.hours) : 0,
+    }))
+  }, [platformCandidate])
+
+  const candidateLoginHourChart = useMemo(() => ({
+    values: platformCandidate?.sessions?.loginHourCounts || new Array(24).fill(0),
+    labels: hourLabels,
+  }), [platformCandidate, hourLabels])
+
+  const candidatePipelineStats = useMemo(() => {
+    const sessions = platformCandidate?.sessions || {}
+    const offers = platformCandidate?.offers || {}
+
+    const connectedHours = Number(sessions.connectedHours) || 0
+    const sessionsCount = Number(sessions.sessionsCount) || 0
+    const mostFrequentLoginHours = Array.isArray(sessions.mostFrequentLoginHours) ? sessions.mostFrequentLoginHours : []
+
+    const topHoursMax = Math.max(1, ...mostFrequentLoginHours.map((h) => Number(h?.count) || 0))
+    const topHoursPipeline = mostFrequentLoginHours.map((h) => {
+      const count = Number(h?.count) || 0
+      return {
+        label: `${String(h?.hour ?? 0).padStart(2, '0')}h`,
+        count,
+        progress: Math.round((count / topHoursMax) * 100),
+      }
+    })
+
+    const appliedCount = Number(offers.appliedCount) || 0
+    const interviewsCount = Number(offers.interviewsCount) || 0
+    const appliedWithInterviewCount = Number(offers.appliedWithInterviewCount) || 0
+
+    const interviewRate = appliedCount > 0 ? Math.round((interviewsCount / appliedCount) * 100) : 0
+    const conversionRate = appliedCount > 0 ? Math.round((appliedWithInterviewCount / appliedCount) * 100) : 0
+
+    const maxFunnelValue = Math.max(1, appliedCount, interviewsCount, appliedWithInterviewCount)
+    const activityReference = Math.max(1, connectedHours, sessionsCount)
+
+    return {
+      connectedHours,
+      sessionsCount,
+      topHourLabel: topHoursPipeline[0]?.label || '—',
+      topHoursPipeline,
+
+      appliedCount,
+      interviewsCount,
+      appliedWithInterviewCount,
+      interviewRate,
+      conversionRate,
+
+      activityHoursProgress: Math.round((connectedHours / activityReference) * 100),
+      activitySessionsProgress: Math.round((sessionsCount / activityReference) * 100),
+
+      appliedProgress: Math.round((appliedCount / maxFunnelValue) * 100),
+      interviewsProgress: Math.round((interviewsCount / maxFunnelValue) * 100),
+      conversionProgress: Math.round((appliedWithInterviewCount / maxFunnelValue) * 100),
+    }
+  }, [platformCandidate])
+
+  const candidateDonutSegments = useMemo(() => ([
+    { label: 'Candidatures', value: candidatePipelineStats.appliedCount, color: '#001d3e' },
+    { label: 'Entretiens', value: candidatePipelineStats.interviewsCount, color: '#06d5e0' },
+    { label: 'Postulé + entretien', value: candidatePipelineStats.appliedWithInterviewCount, color: '#0a5f88' },
+  ]), [candidatePipelineStats])
+
+  const recruiterTotals = platformRecruiter?.totals || {}
+
+  const recruiterTrendSeries = useMemo(() => {
+    const labels = platformRecruiter?.trendLabels || []
+    const values = platformRecruiter?.trendValues || []
+    return values.map((v, i) => ({
+      label: String(labels?.[i] || '').slice(0, 6),
+      value: Number.isFinite(Number(v)) ? Number(v) : 0,
+    }))
+  }, [platformRecruiter])
+
+  const recruiterActivityValues = useMemo(() => (
+    platformRecruiter?.activityByHour || new Array(24).fill(0)
+  ), [platformRecruiter])
+
+  const recruiterConversion = useMemo(() => {
+    const candidacies = Number(recruiterTotals.totalCandidacies) || 0
+    const interviewsCount = Number(recruiterTotals.totalInterviews) || 0
+    return candidacies > 0 ? Math.round((interviewsCount / candidacies) * 100) : 0
+  }, [recruiterTotals])
 
   const filtered = useCallback((rows, keys) => {
     if (!search.trim()) return rows
@@ -664,6 +773,276 @@ export default function DashboardAdmin() {
                           )
                         })}
                       </div>
+                    </div>
+
+                    {/* Global analytics panels */}
+                    <div className="mt-2 rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_0_0_1px_rgba(14,165,233,0.2)]">
+                      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-black uppercase tracking-[0.14em] text-[#5b7f9d]">Vue globale (candidat + recruteur)</p>
+                          <p className="mt-1 text-sm text-[#4f7191]">Pipeline, courbes et statistiques basées sur la base de données.</p>
+                        </div>
+                        {globalAnalyticsLoading ? (
+                          <p className="text-sm text-[#4f7191]">Chargement…</p>
+                        ) : (
+                          <span className="rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-[11px] font-black text-[#0a5f88]">
+                            Live
+                          </span>
+                        )}
+                      </div>
+
+                      {globalAnalyticsLoading ? (
+                        <p className="text-sm text-[#8aa3b9]">Patientez pendant le calcul des analytics.</p>
+                      ) : platformCandidate && platformRecruiter ? (
+                        <div className="grid gap-4 xl:grid-cols-2">
+                          {/* Candidate pipeline */}
+                          <div className="rounded-2xl border border-[#d7e9f8] bg-[#fbfdff] p-4">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p className="text-base font-bold text-[#0d355b]">Pipeline Candidat (global)</p>
+                              <span className="rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-[10px] font-black text-[#0a5f88]">
+                                30 jours
+                              </span>
+                            </div>
+
+                            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                              <div className="rounded-2xl border border-[#d7e9f8] bg-gradient-to-br from-[#f0fbff] to-[#dff7ff] p-4">
+                                <p className="text-[11px] font-black tracking-[0.12em] text-[#0d355b]">ACTIVITÉ</p>
+                                <div className="mt-3 space-y-3">
+                                  <div>
+                                    <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
+                                      <span>TEMPS CONNECTÉ</span>
+                                      <span className="text-[#0d355b]">{candidatePipelineStats.connectedHours} h</span>
+                                    </div>
+                                    <div className="mt-1 h-2 rounded-full bg-cyan-100">
+                                      <div className="h-full rounded-full bg-[#0a5f88]" style={{ width: `${candidatePipelineStats.activityHoursProgress}%` }} />
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
+                                      <span>NOMBRE DE CONNEXIONS</span>
+                                      <span className="text-[#0d355b]">{candidatePipelineStats.sessionsCount}</span>
+                                    </div>
+                                    <div className="mt-1 h-2 rounded-full bg-cyan-100">
+                                      <div className="h-full rounded-full bg-[#06d5e0]" style={{ width: `${candidatePipelineStats.activitySessionsProgress}%` }} />
+                                    </div>
+                                  </div>
+
+                                  <div className="rounded-xl border border-cyan-100 bg-white px-3 py-3">
+                                    <div className="mb-2 flex items-center justify-between">
+                                      <p className="text-[11px] font-black tracking-[0.12em] text-slate-500">HEURES FRÉQUENTES</p>
+                                      <span className="text-[11px] font-semibold text-[#0a5f88]">{candidatePipelineStats.topHourLabel}</span>
+                                    </div>
+
+                                    {candidatePipelineStats.topHoursPipeline.length === 0 ? (
+                                      <p className="text-xs font-semibold text-slate-500">Aucune donnée de connexion.</p>
+                                    ) : (
+                                      <div className="space-y-2">
+                                        {candidatePipelineStats.topHoursPipeline.map((h) => (
+                                          <div key={h.label}>
+                                            <div className="flex items-center justify-between text-[11px] font-semibold text-slate-600">
+                                              <span>{h.label}</span>
+                                              <span className="text-[#0d355b]">{h.count}</span>
+                                            </div>
+                                            <div className="mt-1 h-2 rounded-full bg-cyan-100">
+                                              <div className="h-full rounded-full bg-gradient-to-r from-[#06d5e0] to-[#0a5f88]" style={{ width: `${h.progress}%` }} />
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="rounded-2xl border border-[#d7e9f8] bg-gradient-to-br from-[#edf4ff] to-[#dfeeff] p-4">
+                                <p className="text-[11px] font-black tracking-[0.12em] text-[#0d355b]">PIPELINE CANDIDATURE</p>
+                                <div className="mt-2 flex items-center justify-between gap-2">
+                                  <span className="rounded-full border border-blue-200 bg-white px-2 py-1 text-[10px] font-black text-[#0a5f88]">
+                                    Taux entretien {candidatePipelineStats.interviewRate}%
+                                  </span>
+                                  <span className="text-xs font-semibold text-slate-600">Conv. finale {candidatePipelineStats.conversionRate}%</span>
+                                </div>
+
+                                <div className="mt-4 space-y-3">
+                                  <div>
+                                    <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
+                                      <span>OFFRES POSTULÉES</span>
+                                      <span className="text-[#0d355b]">{candidatePipelineStats.appliedCount}</span>
+                                    </div>
+                                    <div className="mt-1 h-2 rounded-full bg-blue-100">
+                                      <div className="h-full rounded-full bg-[#0f2742]" style={{ width: `${candidatePipelineStats.appliedProgress}%` }} />
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
+                                      <span>ENTRETIENS</span>
+                                      <span className="text-[#0d355b]">{candidatePipelineStats.interviewsCount}</span>
+                                    </div>
+                                    <div className="mt-1 h-2 rounded-full bg-blue-100">
+                                      <div className="h-full rounded-full bg-[#06d5e0]" style={{ width: `${candidatePipelineStats.interviewsProgress}%` }} />
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
+                                      <span>POSTULÉ + ENTRETIEN</span>
+                                      <span className="text-[#0d355b]">{candidatePipelineStats.appliedWithInterviewCount}</span>
+                                    </div>
+                                    <div className="mt-1 h-2 rounded-full bg-blue-100">
+                                      <div className="h-full rounded-full bg-[#0a5f88]" style={{ width: `${candidatePipelineStats.conversionProgress}%` }} />
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                              <div className="rounded-2xl border border-[#d7e9f8] bg-white p-4 lg:col-span-2">
+                                <div className="flex flex-wrap items-end justify-between gap-2">
+                                  <p className="text-xs font-black tracking-[0.12em] text-[#0d355b]">COURBE: heures connectées / jour</p>
+                                  <p className="text-xs font-semibold text-slate-500">30 derniers jours</p>
+                                </div>
+                                <div className="mt-3">
+                                  <LineAreaChart data={candidateConnectedSeries} />
+                                </div>
+                              </div>
+
+                              <div className="rounded-2xl border border-[#d7e9f8] bg-white p-4">
+                                <p className="text-xs font-black tracking-[0.12em] text-[#0d355b]">RÉPARTITION</p>
+                                <div className="mt-3 flex items-center justify-center">
+                                  <DonutChart segments={candidateDonutSegments} />
+                                </div>
+                                <div className="mt-3 space-y-1 text-xs font-semibold text-slate-600">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: '#001d3e' }} />Candidatures</span>
+                                    <span>{candidatePipelineStats.appliedCount}</span>
+                                  </div>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: '#06d5e0' }} />Entretiens</span>
+                                    <span>{candidatePipelineStats.interviewsCount}</span>
+                                  </div>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: '#0a5f88' }} />Postulé + entretien</span>
+                                    <span>{candidatePipelineStats.appliedWithInterviewCount}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                              <div className="rounded-2xl border border-[#d7e9f8] bg-white p-4">
+                                <p className="text-xs font-black tracking-[0.12em] text-[#0d355b]">HISTOGRAMME: heures de connexion</p>
+                                <p className="mt-1 text-xs font-semibold text-slate-500">Nombre de connexions par heure</p>
+                                <div className="mt-3">
+                                  <BarChart values={candidateLoginHourChart.values} labels={candidateLoginHourChart.labels} />
+                                </div>
+                              </div>
+
+                              <div className="rounded-2xl border border-[#d7e9f8] bg-white p-4">
+                                <p className="text-xs font-black tracking-[0.12em] text-[#0d355b]">DERNIÈRES CANDIDATURES</p>
+                                <div className="mt-3 space-y-2">
+                                  {(platformCandidate?.offers?.recentApplied || []).slice(0, 5).map((a) => (
+                                    <div key={a.candidacyId} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                                      <p className="text-sm font-semibold text-slate-800">{a.title}</p>
+                                      <p className="text-xs font-semibold text-slate-500">{a.location || '—'}</p>
+                                      <p className="mt-1 text-[11px] text-slate-400">{fmt(a.appliedAt)}</p>
+                                    </div>
+                                  ))}
+                                  {(!platformCandidate?.offers?.recentApplied || platformCandidate?.offers?.recentApplied.length === 0) && (
+                                    <p className="text-sm text-slate-600">Aucune candidature.</p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Recruiter pipeline */}
+                          <div className="rounded-2xl border border-[#d7e9f8] bg-white p-4">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p className="text-base font-bold text-[#0d355b]">Pipeline Recruteur (global)</p>
+                              <span className="rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-[10px] font-black text-[#0a5f88]">
+                                Conv. entretien {recruiterConversion}%
+                              </span>
+                            </div>
+
+                            <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                              <StatCard label="Offres" value={recruiterTotals.totalOffers ?? 0} />
+                              <StatCard label="Candidatures" value={recruiterTotals.totalCandidacies ?? 0} />
+                              <StatCard label="Entretiens" value={recruiterTotals.totalInterviews ?? 0} />
+                            </div>
+
+                            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                              <div className="rounded-2xl border border-[#d7e9f8] bg-[#fbfdff] p-4">
+                                <div className="flex flex-wrap items-end justify-between gap-2">
+                                  <p className="text-xs font-black tracking-[0.12em] text-[#0d355b]">COURBE: candidatures — 14 derniers jours</p>
+                                </div>
+                                <div className="mt-3">
+                                  <LineAreaChart data={recruiterTrendSeries} />
+                                </div>
+                              </div>
+
+                              <div className="rounded-2xl border border-[#d7e9f8] bg-[#fbfdff] p-4">
+                                <p className="text-xs font-black tracking-[0.12em] text-[#0d355b]">ACTIVITÉ PAR HEURE</p>
+                                <p className="mt-1 text-xs font-semibold text-slate-500">Offres + candidatures + entretiens</p>
+                                <div className="mt-3">
+                                  <BarChart values={recruiterActivityValues} labels={hourLabels} height={160} />
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 rounded-2xl border border-[#d7e9f8] bg-white p-4">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <p className="text-xs font-black tracking-[0.12em] text-[#0d355b]">Funnel (global)</p>
+                                <span className="rounded-full border border-blue-200 bg-white px-2 py-1 text-[10px] font-black text-[#0a5f88]">
+                                  {recruiterTotals.totalInterviews ?? 0} entretiens
+                                </span>
+                              </div>
+
+                              {(() => {
+                                const max = Math.max(1, Number(recruiterTotals.totalOffers) || 0, Number(recruiterTotals.totalCandidacies) || 0, Number(recruiterTotals.totalInterviews) || 0)
+                                const p1 = Math.round(((Number(recruiterTotals.totalOffers) || 0) / max) * 100)
+                                const p2 = Math.round(((Number(recruiterTotals.totalCandidacies) || 0) / max) * 100)
+                                const p3 = Math.round(((Number(recruiterTotals.totalInterviews) || 0) / max) * 100)
+                                return (
+                                  <div className="mt-3 space-y-3">
+                                    <div>
+                                      <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
+                                        <span>OFFRES</span>
+                                        <span className="text-[#0d355b]">{recruiterTotals.totalOffers ?? 0}</span>
+                                      </div>
+                                      <div className="mt-1 h-2 rounded-full bg-blue-100">
+                                        <div className="h-full rounded-full bg-[#0f2742]" style={{ width: `${p1}%` }} />
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
+                                        <span>CANDIDATURES</span>
+                                        <span className="text-[#0d355b]">{recruiterTotals.totalCandidacies ?? 0}</span>
+                                      </div>
+                                      <div className="mt-1 h-2 rounded-full bg-blue-100">
+                                        <div className="h-full rounded-full bg-[#06d5e0]" style={{ width: `${p2}%` }} />
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
+                                        <span>ENTRETIENS</span>
+                                        <span className="text-[#0d355b]">{recruiterTotals.totalInterviews ?? 0}</span>
+                                      </div>
+                                      <div className="mt-1 h-2 rounded-full bg-blue-100">
+                                        <div className="h-full rounded-full bg-[#0a5f88]" style={{ width: `${p3}%` }} />
+                                      </div>
+                                    </div>
+                                  </div>
+                                )
+                              })()}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-[#8aa3b9]">Aucune analytics globale disponible.</p>
+                      )}
                     </div>
 
                     {/* Recent users */}

@@ -6,6 +6,8 @@ const Recruiter = require('../models/Recruiter');
 const Candidate = require('../models/Candidate');
 const JobOffer  = require('../models/JobOffer');
 const Candidacy = require('../models/Candidacy');
+const CandidateSession = require('../models/CandidateSession');
+const Interview = require('../models/Interview');
 const TrainingPath = require('../models/TrainingPath');
 const TrainingApplication = require('../models/TrainingApplication');
 const mailer    = require('../utils/mailer');
@@ -136,6 +138,216 @@ router.get('/stats', requireAdmin, async (req, res) => {
         totalTrainings,
         feedbackCount, avgRating: avgFeedbackRaw[0]?.avg ? Number(avgFeedbackRaw[0].avg.toFixed(2)) : null,
         scoredCandidacies, trendLabels, trendValues, recentRecruiters, recentCandidates },
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur.' });
+  }
+});
+
+// ─── GLOBAL DASHBOARD ANALYTICS ───────────────────────────────────────────
+// Aggregate candidate + recruiter analytics across the whole platform.
+router.get('/dashboard/global', requireAdmin, async (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 90);
+
+    const rangeEnd = new Date();
+    const rangeStart = new Date(rangeEnd.getTime() - days * 24 * 60 * 60 * 1000);
+
+    // Candidate sessions analytics (connected hours + login distribution)
+    const sessions = await CandidateSession.find({
+      startedAt: { $lte: rangeEnd },
+      $or: [{ endedAt: null }, { endedAt: { $gte: rangeStart } }],
+    })
+      .select('startedAt lastSeenAt endedAt')
+      .lean();
+
+    let totalConnectedMs = 0;
+    const loginHourCounts = new Array(24).fill(0);
+
+    // Prebuild day buckets for charts.
+    const dayBuckets = [];
+    const dayKeyToIndex = new Map();
+    for (let i = 0; i < days; i += 1) {
+      const d = new Date(rangeStart.getTime() + i * 24 * 60 * 60 * 1000);
+      d.setHours(0, 0, 0, 0);
+      const key = d.toISOString().slice(0, 10);
+      dayKeyToIndex.set(key, i);
+      dayBuckets.push({ date: key, connectedMs: 0 });
+    }
+
+    for (const s of sessions) {
+      const startedAtRaw = s?.startedAt ? new Date(s.startedAt) : null;
+      const endedAtRaw = s?.endedAt ? new Date(s.endedAt) : null;
+      const lastSeenAtRaw = s?.lastSeenAt ? new Date(s.lastSeenAt) : null;
+      const effectiveEnd = endedAtRaw || lastSeenAtRaw || rangeEnd;
+
+      if (!startedAtRaw || Number.isNaN(startedAtRaw.getTime())) continue;
+      if (Number.isNaN(effectiveEnd.getTime())) continue;
+
+      const hour = startedAtRaw.getHours();
+      if (hour >= 0 && hour <= 23) loginHourCounts[hour] += 1;
+
+      const a = Math.max(startedAtRaw.getTime(), rangeStart.getTime());
+      const b = Math.min(effectiveEnd.getTime(), rangeEnd.getTime());
+      if (b <= a) continue;
+
+      totalConnectedMs += b - a;
+
+      // Split duration across day buckets.
+      let cursor = a;
+      while (cursor < b) {
+        const cursorDate = new Date(cursor);
+        const bucketStart = new Date(cursorDate);
+        bucketStart.setHours(0, 0, 0, 0);
+        const bucketEnd = new Date(bucketStart.getTime() + 24 * 60 * 60 * 1000);
+        const sliceEnd = Math.min(bucketEnd.getTime(), b);
+        const key = bucketStart.toISOString().slice(0, 10);
+        const idx = dayKeyToIndex.get(key);
+        if (idx !== undefined) {
+          dayBuckets[idx].connectedMs += Math.max(0, sliceEnd - cursor);
+        }
+        cursor = sliceEnd;
+      }
+    }
+
+    const connectedHours = Math.round((totalConnectedMs / (1000 * 60 * 60)) * 10) / 10;
+    const mostFrequentLoginHours = loginHourCounts
+      .map((count, hour) => ({ hour, count }))
+      .filter((x) => x.count > 0)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 3);
+
+    const connectedHoursByDay = dayBuckets.map((d) => ({
+      date: d.date,
+      hours: Math.round((d.connectedMs / (1000 * 60 * 60)) * 10) / 10,
+    }));
+
+    // Platform pipeline (candidacies + interviews)
+    const [totalOffers, totalCandidacies, totalInterviews] = await Promise.all([
+      JobOffer.countDocuments(),
+      Candidacy.countDocuments(),
+      Interview.countDocuments(),
+    ]);
+
+    const [candidacyOfferIdsRaw, interviewOfferIdsRaw] = await Promise.all([
+      Candidacy.distinct('jobOfferId'),
+      Interview.distinct('jobOfferId'),
+    ]);
+
+    const candidacyOfferIds = new Set((candidacyOfferIdsRaw || []).map((id) => String(id)).filter(Boolean));
+    const interviewOfferIds = new Set((interviewOfferIdsRaw || []).map((id) => String(id)).filter(Boolean));
+
+    let appliedWithInterviewCount = 0;
+    for (const offerId of candidacyOfferIds) {
+      if (interviewOfferIds.has(offerId)) appliedWithInterviewCount += 1;
+    }
+
+    const recentAppliedDocs = await Candidacy.find()
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .populate('jobOfferId', 'title location contractType salary')
+      .lean();
+
+    const recentApplied = recentAppliedDocs.map((c) => {
+      const offer = c.jobOfferId && typeof c.jobOfferId === 'object' ? c.jobOfferId : null;
+      return {
+        candidacyId: String(c._id),
+        jobOfferId: offer?._id ? String(offer._id) : typeof c.jobOfferId === 'string' ? c.jobOfferId : null,
+        title: offer?.title || 'Offre',
+        location: offer?.location || '',
+        contractType: offer?.contractType || '',
+        salary: offer?.salary || '',
+        appliedAt: c.createdAt || null,
+      };
+    });
+
+    const upcomingInterviewsDocs = await Interview.find({ scheduledAt: { $gte: new Date() } })
+      .sort({ scheduledAt: 1 })
+      .limit(5)
+      .populate('jobOfferId', 'title location contractType salary')
+      .lean();
+
+    const upcomingInterviews = upcomingInterviewsDocs.map((i) => {
+      const offer = i.jobOfferId && typeof i.jobOfferId === 'object' ? i.jobOfferId : null;
+      return {
+        interviewId: String(i._id),
+        scheduledAt: i.scheduledAt,
+        mode: i.mode || '',
+        meetingLink: i.meetingLink || '',
+        location: i.location || '',
+        jobOfferId: offer?._id ? String(offer._id) : typeof i.jobOfferId === 'string' ? i.jobOfferId : null,
+        title: offer?.title || 'Offre',
+      };
+    });
+
+    // Recruiter charts (global) — candidacies trend + activity by hour
+    const since14 = new Date();
+    since14.setDate(since14.getDate() - 13);
+    since14.setHours(0, 0, 0, 0);
+
+    const candidacyTrend = await Candidacy.aggregate([
+      { $match: { createdAt: { $gte: since14 } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
+    const trendMap = Object.fromEntries(candidacyTrend.map((d) => [d._id, d.count]));
+    const trendLabels = [];
+    const trendValues = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      trendLabels.push(d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }));
+      trendValues.push(trendMap[key] || 0);
+    }
+
+    const [offersByHour, candidaciesByHour, interviewsByHour] = await Promise.all([
+      JobOffer.aggregate([{ $project: { h: { $hour: '$createdAt' } } }, { $group: { _id: '$h', count: { $sum: 1 } } }]),
+      Candidacy.aggregate([{ $project: { h: { $hour: '$createdAt' } } }, { $group: { _id: '$h', count: { $sum: 1 } } }]),
+      Interview.aggregate([{ $project: { h: { $hour: '$scheduledAt' } } }, { $group: { _id: '$h', count: { $sum: 1 } } }]),
+    ]);
+
+    const recruiterActivityByHour = new Array(24).fill(0);
+    for (const g of offersByHour || []) recruiterActivityByHour[Number(g?._id) || 0] += Number(g?.count || 0);
+    for (const g of candidaciesByHour || []) recruiterActivityByHour[Number(g?._id) || 0] += Number(g?.count || 0);
+    for (const g of interviewsByHour || []) recruiterActivityByHour[Number(g?._id) || 0] += Number(g?.count || 0);
+
+    return res.json({
+      success: true,
+      globalAnalytics: {
+        platformCandidate: {
+          sessions: {
+            connectedHours,
+            sessionsCount: sessions.length,
+            mostFrequentLoginHours,
+            loginHourCounts,
+            connectedHoursByDay,
+          },
+          offers: {
+            appliedCount: totalCandidacies,
+            interviewsCount: totalInterviews,
+            appliedWithInterviewCount,
+            recentApplied,
+            upcomingInterviews,
+          },
+        },
+        platformRecruiter: {
+          totals: {
+            totalOffers,
+            totalCandidacies,
+            totalInterviews,
+          },
+          trendLabels,
+          trendValues,
+          activityByHour: recruiterActivityByHour,
+        },
+      },
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: 'Erreur serveur.' });
