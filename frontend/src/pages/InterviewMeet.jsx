@@ -366,7 +366,7 @@ function InterviewMeet() {
 					<div>
 						<p className='text-[10px] font-black uppercase tracking-[0.14em] text-cyan-700'>AIR Meet</p>
 						<p className='text-sm font-semibold text-slate-800'>{roomLabel}</p>
-						<p className='mt-1 text-xs text-slate-600'>Session Jitsi intégrée dans AIR</p>
+						<p className='mt-1 text-xs text-slate-600'>Session Jitsi intégrée dans ForsaTech</p>
 					</div>
 				</div>
 				<div className='flex items-center gap-2'>

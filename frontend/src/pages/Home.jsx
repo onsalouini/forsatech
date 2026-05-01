@@ -82,7 +82,7 @@ function Home() {
       <div className='mx-auto max-w-6xl'>
         <div className='flex flex-wrap items-end justify-between gap-3'>
           <div>
-            <p className='text-xs font-black uppercase tracking-[0.14em] text-[#0a5f88]'>Feedback AIR</p>
+            <p className='text-xs font-black uppercase tracking-[0.14em] text-[#0a5f88]'>Feedback ForsaTech</p>
             <h2 className='mt-2 text-3xl font-black text-[#0d355b]'>Ce que disent les utilisateurs</h2>
             <p className='mt-2 text-sm text-[#4f7191]'>Feedback global: {overall.averageRating ? `${overall.averageRating}/5` : '—'} • {overall.totalFeedbacks} avis</p>
           </div>

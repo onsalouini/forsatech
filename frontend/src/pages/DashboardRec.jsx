@@ -3444,7 +3444,7 @@ function DashboardRec() {
 							<div className='absolute bottom-14 left-0 w-[86vw] max-w-xs rounded-2xl border border-cyan-100 bg-white p-4 shadow-2xl'>
 								<div className='flex items-start justify-between gap-2'>
 									<div>
-										<p className='text-sm font-black text-[#0d355b]'>Votre avis sur AIR</p>
+										<p className='text-sm font-black text-[#0d355b]'>Votre avis sur ForsaTech</p>
 										<p className='mt-1 text-xs text-[#4f7191]'>Moyenne globale: {appFeedbackSummary.averageRating ? `${appFeedbackSummary.averageRating}/5` : '—'} • {appFeedbackSummary.totalFeedbacks} avis</p>
 									</div>
 									<button type='button' onClick={() => setAppFeedbackOpen(false)} className='rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50'>Fermer</button>
