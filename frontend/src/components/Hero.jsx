@@ -24,19 +24,20 @@ function Hero() {
               style={{ fontFamily: "'Anton', sans-serif" }}
               className="text-white text-4xl sm:text-5xl leading-none tracking-wide"
             >
-              Artificial.
+              ForsaTech
+
             </h1>
             <h1
               style={{ fontFamily: "'Anton', sans-serif" }}
               className="text-white text-4xl sm:text-5xl leading-none tracking-wide ml-3 sm:ml-12"
             >
-              Intelligence.
+              Recrutement 
             </h1>
             <h1
               style={{ fontFamily: "'Anton', sans-serif" }}
               className="text-white text-4xl sm:text-5xl leading-none tracking-wide ml-6 sm:ml-20"
-            >
-              Recruitment.
+            >intelligent par IA.
+              
             </h1>
          
           </div>

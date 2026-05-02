@@ -10,6 +10,7 @@ function CandidateCVUpload() {
 	const [file, setFile] = useState(null)
 	const [dragActive, setDragActive] = useState(false)
 	const [error, setError] = useState('')
+	const [extractionFailed, setExtractionFailed] = useState(false)
 	const [previewUrl, setPreviewUrl] = useState('')
 	const [uploading, setUploading] = useState(false)
 	const [success, setSuccess] = useState('')
@@ -28,6 +29,7 @@ function CandidateCVUpload() {
 
 	const uploadToBackend = async () => {
 		setError('')
+		setExtractionFailed(false)
 		setSuccess('')
 		let nextRoute = ''
 		if (!file) {
@@ -59,7 +61,12 @@ function CandidateCVUpload() {
 			})
 			const data = await response.json()
 			if (!response.ok || !data.success) {
-				setError(data.message || 'Upload impossible.')
+				if (response.status === 422) {
+					setExtractionFailed(true)
+					setError(data.message || "L'extraction de ton CV est impossible.")
+				} else {
+					setError(data.message || 'Upload impossible.')
+				}
 				return
 			}
 			setSuccess('CV uploadé et sauvegardé dans la base. Redirection…')
@@ -197,21 +204,19 @@ function CandidateCVUpload() {
 								</div>
 
 								{error ? (
-									<div className='mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 font-semibold'>{error}</div>
-								) : null}
-
-								{success ? (
-									<div className='mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 font-semibold'>{success}</div>
-								) : null}
-
-								{file ? (
-									<div className='mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 font-semibold'>
-										Fichier sélectionné: {fileLabel}
-									</div>
-								) : (
-									<div className='mt-5 text-xs text-slate-500'>Aucun fichier sélectionné.</div>
+							<div className='mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 font-semibold'>
+								<p>{error}</p>
+								{extractionFailed && (
+									<button
+										type='button'
+										onClick={() => navigate('/EspaceCandidat/cv/builder')}
+										className='mt-3 inline-block rounded-lg bg-red-600 px-4 py-2 text-white text-sm font-bold hover:bg-red-700 transition'
+									>
+										Reconstruire mon CV avec le site →
+									</button>
 								)}
-
+							</div>
+						) : null}
 								{previewBlock}
 							</div>
 

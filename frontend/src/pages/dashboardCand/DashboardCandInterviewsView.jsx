@@ -196,7 +196,7 @@ function InterviewCard({ iv, handleJoinInterviewMeet, highlight }) {
 						onClick={() => handleJoinInterviewMeet?.(meetingLink, interviewId)}
 						className='mt-4 w-full rounded-xl bg-gradient-to-r from-[#0a5f88] to-[#06d5e0] py-2.5 text-sm font-black text-white shadow-md transition hover:opacity-90'
 					>
-						Rejoindre l'entretien — AIR Meet
+						Rejoindre l'entretien — ForsaTech Meet
 					</button>
 				) : null}
 			</div>

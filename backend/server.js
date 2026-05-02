@@ -2216,15 +2216,15 @@ function resolveUploadPublicPathToAbsPath(publicPath) {
   return path.join(__dirname, rel);
 }
 
-async function triggerCvExtractionAsync(cv) {
+async function triggerCvExtractionAsync(cv, { timeoutOverrideMs } = {}) {
   try {
     const publicPath = String(cv?.uploadedFile?.path || '').trim();
-    if (!publicPath || !publicPath.startsWith('/uploads/cv/')) return;
+    if (!publicPath || !publicPath.startsWith('/uploads/cv/')) return false;
     const absPath = resolveUploadPublicPathToAbsPath(publicPath);
-    if (!fs.existsSync(absPath)) return;
+    if (!fs.existsSync(absPath)) return false;
 
     const analyzerBaseUrl = (process.env.CV_ANALYZER_URL || 'http://127.0.0.1:8001').toString().replace(/\/+$/, '');
-    const timeoutMs = readIntEnv('CV_ANALYZER_TIMEOUT_MS', 90000, { min: 5000, max: 300000 });
+    const timeoutMs = timeoutOverrideMs || readIntEnv('CV_ANALYZER_TIMEOUT_MS', 90000, { min: 5000, max: 300000 });
 
     const fileBuffer = await fs.promises.readFile(absPath);
     const fileName = String(cv?.uploadedFile?.originalName || cv?.uploadedFile?.fileName || 'cv');
@@ -2244,13 +2244,14 @@ async function triggerCvExtractionAsync(cv) {
       signal: controller.signal,
     }).finally(() => clearTimeout(timeout));
 
-    if (!resp.ok) return;
+    if (!resp.ok) return false;
     const data = await resp.json().catch(() => ({}));
     const localCvText = await extractTextFromBuffer(fileBuffer, mimeType, fileName);
     const extractionToStore = buildStructuredCvExtraction(data, { fallbackText: localCvText });
     await CV.findByIdAndUpdate(cv._id, { $set: { extraction: extractionToStore } });
+    return true;
   } catch {
-    // Silent fail — extraction is best-effort
+    return false;
   }
 }
 
@@ -2845,8 +2846,15 @@ app.post('/api/cv/upload', (req, res) => {
         },
       });
 
-      // Fire-and-forget extraction côté candidat
-      triggerCvExtractionAsync(created).catch(() => {});
+      // Extraction synchrone — bloque la navigation si le service Python rejette le fichier
+      const extractionOk = await triggerCvExtractionAsync(created, { timeoutOverrideMs: 45000 });
+      if (!extractionOk) {
+        await CV.findByIdAndDelete(created._id).catch(() => {});
+        return res.status(422).json({
+          success: false,
+          message: "L'extraction de ton CV est impossible. Réessaye une autre fois ou reconstruis-le directement avec notre site.",
+        });
+      }
 
       return res.status(200).json({
         success: true,

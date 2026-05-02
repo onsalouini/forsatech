@@ -77,7 +77,7 @@ export function DashboardCandNotificationsView({
 												onClick={() => handleJoinInterviewMeet?.(meetingLink, interviewId)}
 												className='mt-3 inline-block text-xs font-bold text-cyan-700 hover:underline'
 											>
-												Rejoindre l entretien dans AIR Meet
+												Rejoindre l'entretien dans ForsaTech Meet
 											</button>
 										) : null}
 										{notes ? (
