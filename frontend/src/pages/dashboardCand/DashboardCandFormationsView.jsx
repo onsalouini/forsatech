@@ -170,11 +170,11 @@ function CoursePlayer({ formation, candidateId, onClose }) {
 	const embed = current?.video ? getEmbed(current.video.url) : { type: 'none', src: '' }
 
 	return (
-		<div className='fixed inset-0 z-50 flex flex-col bg-slate-950 text-white'>
+		<div className='fixed inset-x-0 -top-8 bottom-0 z-[70] flex flex-col bg-slate-950 text-white'>
 			{/* Top bar */}
-			<header className='flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-[#0a1525] px-5 py-3'>
+			<header className='flex min-h-[84px] shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-[#0a1525] px-5 py-4 md:py-5'>
 				<div className='min-w-0'>
-					<p className='text-[10px] font-black uppercase tracking-[0.16em] text-cyan-300/80'>{formation.provider || 'ForsaTech'}</p>
+					<p className='text-[10px] font-black uppercase tracking-[0.16em] text-cyan-300/80'>ForsaTech</p>
 					<h2 className='truncate text-base font-black md:text-lg'>{formation.title}</h2>
 				</div>
 				<div className='flex items-center gap-3'>
@@ -284,11 +284,19 @@ function CoursePlayer({ formation, candidateId, onClose }) {
 												const key = `${sIdx}-${vIdx}`
 												const isActive = key === activeKey
 												const isWatched = watched.has(key)
+												
+												// Check if this video can be accessed
+												// It can be accessed if it's the first video overall, or if all previous videos have been watched
+												const canAccess = playlist.findIndex(p => `${p.sectionIndex}-${p.videoIndex}` === key) === 0 || 
+													playlist.slice(0, playlist.findIndex(p => `${p.sectionIndex}-${p.videoIndex}` === key)).every(p => watched.has(`${p.sectionIndex}-${p.videoIndex}`))
+												
 												return (
 													<button
 														key={vIdx}
-														onClick={() => setActiveKey(key)}
+														onClick={() => canAccess && setActiveKey(key)}
+														disabled={!canAccess}
 														className={`flex w-full items-center gap-3 px-5 py-2.5 text-left text-sm transition ${
+															!canAccess ? 'opacity-50 cursor-not-allowed' :
 															isActive ? 'bg-cyan-500/15 text-white' : 'text-white/75 hover:bg-white/5'
 														}`}
 													>
@@ -312,6 +320,7 @@ function CoursePlayer({ formation, candidateId, onClose }) {
 														<span className='flex-1 truncate'>
 															{vIdx + 1}. {video.title || `Vidéo ${vIdx + 1}`}
 														</span>
+														{!canAccess ? <span className='text-xs text-white/50'>🔒</span> : null}
 													</button>
 												)
 											})}
@@ -321,8 +330,9 @@ function CoursePlayer({ formation, candidateId, onClose }) {
 											{hasTest ? (
 												<button
 													onClick={() => setActiveTest({ section, formationId: formation._id })}
-													disabled={!candidateId}
-													className='m-3 flex w-[calc(100%-1.5rem)] items-center justify-center gap-2 rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50'
+													disabled={!candidateId || sectionWatched < videos.length}
+													className='m-3 flex w-[calc(100%-1.5rem)] items-center justify-center gap-2 rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed'
+													title={sectionWatched < videos.length ? `Regardez les ${videos.length - sectionWatched} vidéo(s) restante(s) pour accéder au test` : ''}
 												>
 													📝 Passer le test ({section.test.questions.length} questions • ≥ {section.test.passingScore || 50}%)
 												</button>

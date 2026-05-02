@@ -936,9 +936,11 @@ function DashboardCand() {
 			const key = toLocalDateKey(dt)
 			if (!key) continue
 			const offerTitle = String(i?.offerTitle || i?.jobOfferTitle || i?.title || i?.jobOffer?.title || 'Offre').trim() || 'Offre'
+			const dateStr = dt.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+			const timeStr = dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
 			const entry = {
 				offerTitle,
-				time: dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+				time: `${dateStr} ${timeStr}`,
 			}
 			const prev = byDate.get(key) || []
 			prev.push(entry)
@@ -1296,6 +1298,10 @@ function DashboardCand() {
 		const h = String(currentTime.getHours()).padStart(2, '0')
 		const m = String(currentTime.getMinutes()).padStart(2, '0')
 		return `${h}:${m}`
+	}, [currentTime])
+
+	const formattedDate = useMemo(() => {
+		return currentTime.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
 	}, [currentTime])
 
 	const greeting = useMemo(() => {
@@ -1738,10 +1744,13 @@ function DashboardCand() {
 									{candidate?.firstName || 'Candidat'}, voici vos offres et vos correspondances.
 								</p>
 							</div>
-							<div className='flex items-center gap-3'>
-								<span className='candidate-dashboard__time inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-sm font-semibold text-[#0a5f88]'>
-									<span className='h-2 w-2 animate-pulse rounded-full bg-[#06d5e0]' />
-									{formattedTime}
+							<div className='flex items-center gap-4'>
+								<span className='candidate-dashboard__time inline-flex flex-col items-start gap-1 rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-sm font-semibold text-[#0a5f88]'>
+									<div className='flex items-center gap-2'>
+										<span className='h-2 w-2 animate-pulse rounded-full bg-[#06d5e0]' />
+										{formattedTime}
+									</div>
+									<div className='text-xs font-medium text-[#0a5f88]/70'>{formattedDate}</div>
 								</span>
 								<div className='flex items-center gap-2'>
 									<span className={`text-xs font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-500'}`}>{isDarkMode ? 'Sombre' : 'Clair'}</span>
@@ -1758,21 +1767,6 @@ function DashboardCand() {
 										<span className='theme-switch__thumb' />
 									</button>
 								</div>
-								<button
-									type='button'
-									onClick={handleRefreshPage}
-									className='candidate-dashboard__ghost-btn rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50'
-									title='Actualiser la section visible'
-								>
-									Actualiser
-								</button>
-								<button
-									type='button'
-									onClick={() => setSelectedView('candidatures')}
-									className='candidate-dashboard__primary-btn rounded-xl bg-[#001d3e] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-95'
-								>
-									Mes candidatures
-								</button>
 							</div>
 						</div>
 

@@ -126,7 +126,7 @@ if (location.pathname.startsWith('/admin')) return null
                 key={item.id}
                 type='button'
                 onClick={() => scrollToSection(item.id)}
-                className={`rounded-full px-3 py-2 text-base sm:text-lg font-medium transition ${
+                className={`rounded-full px-3 py-2 text-l transition ${
                   isActive
                     ? ' text-[#06d5e0] '
                     : 'text-cyan-50/90 hover:text-white hover:bg-white/10'
