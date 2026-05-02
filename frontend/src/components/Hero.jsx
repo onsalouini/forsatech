@@ -9,7 +9,7 @@ function Hero() {
   return (
     
     <div
-      className='w-full min-h-[56vh] sm:min-h-[62vh] lg:min-h-[66vh] relative bg-cover bg-center'
+      className='w-full min-h-[56vh] sm:min-h-[62vh] lg:min-h-[52vh] relative bg-cover bg-center'
       style={{ backgroundImage: `url(${assets.couverture})` }}
     >
       {/* Overlay sombre */}
@@ -22,23 +22,18 @@ function Hero() {
           <div className="mb-5 space-y-1">
             <h1
               style={{ fontFamily: "'Anton', sans-serif" }}
-              className="text-white text-4xl sm:text-5xl leading-none tracking-wide"
+              className="text-[#05e3ee] text-4xl sm:text-5xl leading-none tracking-wide"
             >
               ForsaTech
 
             </h1>
             <h1
               style={{ fontFamily: "'Anton', sans-serif" }}
-              className="text-white text-4xl sm:text-5xl leading-none tracking-wide ml-3 sm:ml-12"
+              className="text-white text-xl sm:text-4xl leading-none tracking-wide ml-3 sm:ml-12"
             >
-              Recrutement 
+              Recrutement intelligent par IA.
             </h1>
-            <h1
-              style={{ fontFamily: "'Anton', sans-serif" }}
-              className="text-white text-4xl sm:text-5xl leading-none tracking-wide ml-6 sm:ml-20"
-            >intelligent par IA.
-              
-            </h1>
+           
          
           </div>
           <div>
