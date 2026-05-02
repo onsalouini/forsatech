@@ -21,6 +21,8 @@ function timeAgo(dateStr) {
 
 export default function ChatWidget() {
   const me = useCurrentUser();
+  // Add temporarily at the top of the component after useCurrentUser()
+console.log('👤 Current user:', me);
   const meRef = useRef(me);
   useEffect(() => { meRef.current = me; }, [me]);
 
@@ -75,92 +77,111 @@ export default function ChatWidget() {
   const loadInbox = () => loadInboxRef.current();
 
   // ── Socket setup ──────────────────────────────────────────────
-  useEffect(() => {
-    console.log('Connecting socket...');
-    socket.connect();
+  // ── Socket setup ──────────────────────────────────────────────
+useEffect(() => {
+  socket.connect();
 
-    socket.on('connect', () => {
-      console.log('✅ Socket connected successfully');
+  // Re-join all rooms after any (re)connection
+ const rejoinRooms = () => {
+  const me = meRef.current;
+  if (!me) return;
+  joinedKeysRef.current.forEach((key) => {
+    const parts = key.split('__').map((p) => {
+      const idx = p.indexOf(':');
+      return { role: p.slice(0, idx), id: p.slice(idx + 1) };
     });
+    const myPart = parts.find((p) => p.id === me.id);
+    const otherPart = parts.find((p) => p.id !== me.id);
+    // Only rejoin valid recruiter↔candidate rooms
+    if (myPart && otherPart && myPart.role !== otherPart.role) {
+      socket.emit('dm:join', {
+        myRole: myPart.role, myId: myPart.id,
+        otherRole: otherPart.role, otherId: otherPart.id,
+      });
+    }
+  });
+};
+  socket.on('connect', () => {
+    console.log('✅ Socket connected');
+    rejoinRooms();
+  });
 
-    socket.on('disconnect', () => {
-      console.log('❌ Socket disconnected');
-    });
+  socket.on('disconnect', () => {
+    console.log('❌ Socket disconnected');
+    // Clear joined keys so they get re-joined on reconnect
+    joinedKeysRef.current = new Set();
+  });
 
-    socket.on('dm:message', (msg) => {
-      console.log('📨 Message received via socket:', msg);
-      const me = meRef.current;
-      const currentContact = contactRef.current;
-      const currentScreen = screenRef.current;
+  socket.on('dm:message', (msg) => {
+    console.log('📨 Message received:', msg);
+    const me = meRef.current;
+    const currentContact = contactRef.current;
+    const currentScreen = screenRef.current;
 
-      // Check if this message is for the currently OPEN chat
-      if (currentScreen === 'chat' && currentContact && me) {
-        const activeKey = convKey(me.role, me.id, currentContact.role, currentContact.id);
-        
-        if (msg.conversationKey === activeKey) {
-          // Add message to current chat (avoid duplicates)
-          setMessages((prev) =>
-            prev.find((m) => String(m._id) === String(msg._id)) ? prev : [...prev, {
-              ...msg,
-              senderId: String(msg.senderId)
-            }]
-          );
-
-          // Mark as read since chat is open (only for messages from others)
-          if (String(msg.senderId) !== String(me.id)) {
-            fetch(`${API_BASE}/dm/read`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ conversationKey: activeKey, userId: me.id }),
-            }).catch(() => {});
-          }
-          
-          // Refresh inbox after a short delay to update unread count
-          setTimeout(() => loadInboxRef.current(), 100);
-          return;
+    if (currentScreen === 'chat' && currentContact && me) {
+      const activeKey = convKey(me.role, me.id, currentContact.role, currentContact.id);
+      if (msg.conversationKey === activeKey) {
+        setMessages((prev) =>
+          prev.find((m) => String(m._id) === String(msg._id))
+            ? prev
+            : [...prev, { ...msg, senderId: String(msg.senderId) }]
+        );
+        if (String(msg.senderId) !== String(me.id)) {
+          fetch(`${API_BASE}/dm/read`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ conversationKey: activeKey, userId: me.id }),
+          }).catch(() => {});
         }
+        setTimeout(() => loadInboxRef.current(), 100);
+        return;
       }
-      
-      // For messages NOT in the open chat, just refresh inbox
-      loadInboxRef.current();
-    });
+    }
+    loadInboxRef.current();
+  });
 
-    socket.on('dm:error', (e) => console.error('[DM]', e.message));
+  socket.on('dm:error', (e) => console.error('[DM error]', e.message));
 
-    return () => {
-      socket.off('dm:message');
-      socket.off('dm:error');
-      socket.off('connect');
-      socket.off('disconnect');
-      socket.disconnect();
-    };
-  }, []);
+  return () => {
+    socket.off('dm:message');
+    socket.off('dm:error');
+    socket.off('connect');
+    socket.off('disconnect');
+    socket.disconnect();
+  };
+}, []);
 
-  // ── Join ALL existing conversation rooms on load ───────────────
-  useEffect(() => {
-    if (!me) return;
-    (async () => {
-      try {
-        const res = await fetch(`${API_BASE}/dm/conversations?userId=${me.id}&userRole=${me.role}`);
-        const data = await res.json();
-        if (!data.success) return;
-        data.conversations.forEach((conv) => {
-          if (!joinedKeysRef.current.has(conv.conversationKey)) {
+// ── Join ALL existing conversation rooms on load ───────────────
+useEffect(() => {
+  if (!me) return;
+  (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/dm/conversations?userId=${me.id}&userRole=${me.role}`);
+      const data = await res.json();
+      if (!data.success) return;
+
+      data.conversations.forEach((conv) => {
+        if (!joinedKeysRef.current.has(conv.conversationKey)) {
+          // Only emit if socket is already connected
+          if (socket.connected) {
             console.log('Joining room:', conv.conversationKey);
             socket.emit('dm:join', {
               myRole: me.role, myId: me.id,
               otherRole: conv.otherRole, otherId: conv.otherId,
             });
-            joinedKeysRef.current.add(conv.conversationKey);
           }
-        });
-        setConversations(data.conversations);
-        setTotalUnread(data.conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0));
-      } catch {
-        // silently fail
-      }
-    })();
-  }, [me]);
+          // Always track it so rejoinRooms() can re-emit after connect
+          joinedKeysRef.current.add(conv.conversationKey);
+        }
+      });
+
+      setConversations(data.conversations);
+      setTotalUnread(data.conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0));
+    } catch {
+      // silently fail
+    }
+  })();
+}, [me]);
 
   // ── Auto-scroll ───────────────────────────────────────────────
   useEffect(() => {
@@ -183,20 +204,21 @@ export default function ChatWidget() {
     if (!query.trim()) { setResults([]); return; }
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
-      setSearching(true);
-      try {
-        const me = meRef.current;
-        const res = await fetch(
-          `${API_BASE}/dm/search?q=${encodeURIComponent(query)}&excludeId=${me?.id ?? ''}&excludeRole=${me?.role ?? ''}`
-        );
-        const data = await res.json();
-        if (data.success) setResults(data.results);
-      } catch {
-        // silently fail
-      } finally {
-        setSearching(false);
-      }
-    }, 280);
+  setSearching(true);
+  try {
+    const me = meRef.current;
+    const url = `${API_BASE}/dm/search?q=${encodeURIComponent(query)}&excludeId=${me?.id ?? ''}&excludeRole=${me?.role ?? ''}`;
+    console.log('🔍 Searching:', url);  // ADD
+    const res = await fetch(url);
+    const data = await res.json();
+    console.log('🔍 Search results:', data);  // ADD
+    if (data.success) setResults(data.results);
+  } catch (e) {
+    console.error('Search failed:', e);  // ADD
+  } finally {
+    setSearching(false);
+  }
+}, 280);
     return () => clearTimeout(debounceRef.current);
   }, [query]);
 
@@ -252,29 +274,38 @@ export default function ChatWidget() {
   };
 
   const handleSend = () => {
-    const me = meRef.current;
-    if (!text.trim() || !me || !contact) return;
-    
-    // Optimistic update for instant feedback
-    const tempMessage = {
-      _id: `temp-${Date.now()}`,
-      senderId: me.id,
-      senderName: me.name,
-      text: text.trim(),
-      createdAt: new Date().toISOString(),
-      isTemp: true
-    };
-    
-    setMessages(prev => [...prev, tempMessage]);
-    
-    socket.emit('dm:send', {
-      myRole: me.role, myId: me.id, myName: me.name,
-      otherRole: contact.role, otherId: contact.id,
-      text: text.trim(),
-    });
-    
-    setText('');
+  const me = meRef.current;
+  if (!text.trim() || !me || !contact) return;
+  
+  console.log('📤 Sending message:', {
+    myRole: me.role,
+    myId: me.id,
+    otherRole: contact.role,
+    otherId: contact.id,
+    text: text.trim(),
+    socketConnected: socket.connected,  // ADD THIS
+    socketId: socket.id,                // ADD THIS
+  });
+  
+  const tempMessage = {
+    _id: `temp-${Date.now()}`,
+    senderId: me.id,
+    senderName: me.name,
+    text: text.trim(),
+    createdAt: new Date().toISOString(),
+    isTemp: true
   };
+  
+  setMessages(prev => [...prev, tempMessage]);
+  
+  socket.emit('dm:send', {
+    myRole: me.role, myId: me.id, myName: me.name,
+    otherRole: contact.role, otherId: contact.id,
+    text: text.trim(),
+  });
+  
+  setText('');
+};
 
   const handleKey = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }

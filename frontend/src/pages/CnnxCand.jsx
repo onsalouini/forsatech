@@ -157,12 +157,16 @@ function CnnxCand() {
 		if (handleBannedAccount(data.candidate, setAuthError, navigate)) return
 
 		// ONLY STORE AFTER CLEAR PASS
-		localStorage.setItem('airCandidate', JSON.stringify(data.candidate))
+		localStorage.removeItem('airRecruiter')    // ADD — clear stale recruiter
+localStorage.removeItem('airAdmin')        // ADD — clear stale admin
+localStorage.setItem('airCandidate', JSON.stringify(data.candidate))
 
-		if (data?.sessionId) {
-			localStorage.setItem('airCandidateSessionId', String(data.sessionId))
-			window.dispatchEvent(new Event('localStorageChange'))
-		}
+if (data?.sessionId) {
+  localStorage.setItem('airCandidateSessionId', String(data.sessionId))
+} else {
+  localStorage.removeItem('airCandidateSessionId')
+}
+window.dispatchEvent(new Event('localStorageChange'))  // always fire
 
 		let nextRoute = '/EspaceCandidat'
 

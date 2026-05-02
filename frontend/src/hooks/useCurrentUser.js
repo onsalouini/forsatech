@@ -1,46 +1,56 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+
+const readUser = () => {
+  try {
+    const recruiterRaw = localStorage.getItem('airRecruiter');
+    if (recruiterRaw) {
+      const r = JSON.parse(recruiterRaw);
+      return {
+        role: 'recruiter',
+        id: String(r._id || r.id || ''),
+        name: `${r.firstName || ''} ${r.lastName || ''}`.trim(),
+      };
+    }
+    const candidateRaw = localStorage.getItem('airCandidate');
+    if (candidateRaw) {
+      const c = JSON.parse(candidateRaw);
+      return {
+        role: 'candidate',
+        id: String(c._id || c.id || ''),
+        name: `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+      };
+    }
+  } catch {
+    // corrupted localStorage
+  }
+  return null;
+};
+
+// Stable serialization to compare users without object reference issues
+const serializeUser = (u) => u ? `${u.role}:${u.id}:${u.name}` : 'null';
 
 export function useCurrentUser() {
-  const readUser = () => {
-    try {
-      const recruiterRaw = localStorage.getItem('airRecruiter');
-      if (recruiterRaw) {
-        const r = JSON.parse(recruiterRaw);
-        return {
-          role: 'recruiter',
-          id: String(r._id || r.id || ''),
-          name: `${r.firstName || ''} ${r.lastName || ''}`.trim(),
-        };
-      }
-      const candidateRaw = localStorage.getItem('airCandidate');
-      if (candidateRaw) {
-        const c = JSON.parse(candidateRaw);
-        return {
-          role: 'candidate',
-          id: String(c._id || c.id || ''),
-          name: `${c.firstName || ''} ${c.lastName || ''}`.trim(),
-        };
-      }
-    } catch {
-      // corrupted localStorage
-    }
-    return null;
-  };
-
   const [user, setUser] = useState(readUser);
+  const [serialized, setSerialized] = useState(() => serializeUser(readUser()));
 
   useEffect(() => {
-    // Fires when localStorage changes in ANOTHER tab
-    const onStorage = () => setUser(readUser());
-    window.addEventListener('storage', onStorage);
+    const onStorageChange = () => {
+      const newUser = readUser();
+      const newSerialized = serializeUser(newUser);
+      // Only update state if user actually changed
+      setSerialized((prev) => {
+        if (prev === newSerialized) return prev;
+        setUser(newUser);
+        return newSerialized;
+      });
+    };
 
-    // Fires when localStorage changes in the SAME tab
-    const onLocalChange = () => setUser(readUser());
-    window.addEventListener('localStorageChange', onLocalChange);
+    window.addEventListener('storage', onStorageChange);
+    window.addEventListener('localStorageChange', onStorageChange);
 
     return () => {
-      window.removeEventListener('storage', onStorage);
-      window.removeEventListener('localStorageChange', onLocalChange);
+      window.removeEventListener('storage', onStorageChange);
+      window.removeEventListener('localStorageChange', onStorageChange);
     };
   }, []);
 

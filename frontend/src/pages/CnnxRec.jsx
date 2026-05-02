@@ -151,8 +151,11 @@ function CnnxRec() {
 		// =========================
 		// 3. STORE SESSION
 		// =========================
-		localStorage.setItem('airRecruiter', JSON.stringify(data.recruiter))
-		window.dispatchEvent(new Event('localStorageChange'))
+	localStorage.removeItem('airCandidate')         // ADD — clear stale candidate
+localStorage.removeItem('airCandidateSessionId') // ADD — clear stale session
+localStorage.removeItem('airAdmin')             // ADD — clear stale admin
+localStorage.setItem('airRecruiter', JSON.stringify(data.recruiter))
+window.dispatchEvent(new Event('localStorageChange'))
 
 		// =========================
 		// 4. REDIRECT
