@@ -63,39 +63,123 @@ if (!fs.existsSync(cvUploadsDir)) {
 }
 app.use('/uploads/cv', express.static(cvUploadsDir));
 
-// Formations uploads (images + videos)
-const formationsUploadsDir = path.join(__dirname, 'uploads', 'formations');
-if (!fs.existsSync(formationsUploadsDir)) {
-  fs.mkdirSync(formationsUploadsDir, { recursive: true });
-}
-app.use('/uploads/formations', express.static(formationsUploadsDir));
+// Formations uploads — stockage GridFS (MongoDB)
+const { GridFSBucket, ObjectId: MongoObjectId } = require('mongodb');
 
-const formationsStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, formationsUploadsDir),
-  filename: (req, file, cb) => {
-    const safe = (file.originalname || 'file').replace(/[^\w.\-]+/g, '_');
-    cb(null, Date.now() + '-' + Math.round(Math.random() * 1e9) + '-' + safe);
-  },
-});
-const formationsUpload = multer({
-  storage: formationsStorage,
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB pour les vidéos
-  fileFilter: (req, file, cb) => {
-    if (/^(image|video)\//.test(file.mimetype)) cb(null, true);
-    else cb(new Error('Seuls les fichiers image ou vidéo sont autorisés.'));
-  },
-});
-
-app.post('/api/admin/formations/upload', formationsUpload.single('file'), (req, res) => {
-  if (!req.file) return res.status(400).json({ success: false, message: 'Aucun fichier reçu.' });
-  const url = `/uploads/formations/${req.file.filename}`;
-  return res.json({
-    success: true,
-    url,
-    filename: req.file.filename,
-    mimetype: req.file.mimetype,
-    size: req.file.size,
+let formationsGridBucket = null;
+mongoose.connection.once('open', () => {
+  formationsGridBucket = new GridFSBucket(mongoose.connection.db, {
+    bucketName: 'formations_files',
+    chunkSizeBytes: 15 * 1024 * 1024, // 15 MB par chunk (max MongoDB doc = 16 MB, marge pour métadonnées)
   });
+  console.log('[GridFS] formations_files bucket ready (chunk=15MB)');
+});
+
+const Busboy = require('busboy');
+
+// Upload formation file → GridFS (streaming, pas de buffer RAM)
+app.post('/api/admin/formations/upload', (req, res) => {
+  if (!formationsGridBucket) return res.status(503).json({ success: false, message: 'Stockage non prêt.' });
+
+  let responded = false;
+  const bb = Busboy({
+    headers: req.headers,
+    limits: { fileSize: 2 * 1024 * 1024 * 1024 }, // 2 GB max
+  });
+
+  bb.on('file', (fieldname, fileStream, info) => {
+    const { filename, mimeType } = info;
+    if (!/^(image|video)\//.test(mimeType)) {
+      fileStream.resume();
+      if (!responded) { responded = true; return res.status(400).json({ success: false, message: 'Seuls les fichiers image ou vidéo sont autorisés.' }); }
+      return;
+    }
+
+    const safe = (filename || 'file').replace(/[^\w.\-]+/g, '_');
+    const uploadStream = formationsGridBucket.openUploadStream(safe, {
+      metadata: { mimetype: mimeType, uploadedAt: new Date() },
+      contentType: mimeType,
+    });
+
+    fileStream.pipe(uploadStream);
+
+    uploadStream.on('finish', () => {
+      if (!responded) {
+        responded = true;
+        const fileId = uploadStream.id.toString();
+        return res.json({
+          success: true,
+          url: `/api/formations/files/${fileId}`,
+          fileId,
+          filename: safe,
+          mimetype: mimeType,
+        });
+      }
+    });
+
+    uploadStream.on('error', (err) => {
+      console.error('[GridFS upload error]', err);
+      if (!responded) { responded = true; return res.status(500).json({ success: false, message: 'Erreur lors du stockage du fichier.' }); }
+    });
+
+    fileStream.on('limit', () => {
+      uploadStream.destroy();
+      if (!responded) { responded = true; return res.status(413).json({ success: false, message: 'Fichier trop volumineux (max 2 Go).' }); }
+    });
+  });
+
+  bb.on('error', (err) => {
+    console.error('[Busboy error]', err);
+    if (!responded) { responded = true; return res.status(500).json({ success: false, message: 'Erreur de traitement du fichier.' }); }
+  });
+
+  req.pipe(bb);
+});
+
+// Servir les fichiers depuis GridFS (avec support Range pour les vidéos)
+app.get('/api/formations/files/:id', async (req, res) => {
+  if (!formationsGridBucket) return res.status(503).send('Stockage non prêt.');
+  let fileId;
+  try {
+    fileId = new MongoObjectId(req.params.id);
+  } catch {
+    return res.status(400).send('ID invalide.');
+  }
+  try {
+    const files = await formationsGridBucket.find({ _id: fileId }).toArray();
+    if (!files.length) return res.status(404).send('Fichier introuvable.');
+    const file = files[0];
+    const contentType = file.contentType || 'application/octet-stream';
+    const fileSize = file.length;
+
+    const rangeHeader = req.headers.range;
+    if (rangeHeader) {
+      const parts = rangeHeader.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunkSize = end - start + 1;
+      res.status(206);
+      res.set({
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': chunkSize,
+        'Content-Type': contentType,
+        'Cache-Control': 'public, max-age=31536000',
+      });
+      formationsGridBucket.openDownloadStream(fileId, { start, end: end + 1 }).pipe(res);
+    } else {
+      res.set({
+        'Content-Type': contentType,
+        'Content-Length': fileSize,
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'public, max-age=31536000',
+      });
+      formationsGridBucket.openDownloadStream(fileId).pipe(res);
+    }
+  } catch (err) {
+    console.error('[GridFS download error]', err);
+    res.status(500).send('Erreur serveur.');
+  }
 });
 
 const storage = multer.diskStorage({

@@ -20,13 +20,15 @@ const LEVEL_BADGE_COLORS = {
 function resolveAssetUrl(url) {
 	if (!url) return ''
 	if (/^(https?:|data:|blob:)/i.test(url)) return url
+	// URLs GridFS (/api/formations/files/:id) → préfixe STATIC_BASE
+	if (url.startsWith('/api/')) return `${STATIC_BASE}${url}`
 	return `${STATIC_BASE}${url.startsWith('/') ? '' : '/'}${url}`
 }
 
 function getEmbed(url) {
 	if (!url) return { type: 'none', src: '' }
 	const trimmed = String(url).trim()
-	if (trimmed.startsWith('/uploads/')) {
+	if (trimmed.startsWith('/uploads/') || trimmed.startsWith('/api/formations/files/')) {
 		return { type: 'file', src: resolveAssetUrl(trimmed) }
 	}
 	const yt = trimmed.match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([\w-]{6,})/i)

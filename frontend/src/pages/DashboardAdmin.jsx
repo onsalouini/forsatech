@@ -16,6 +16,8 @@ const STATIC_BASE = API_BASE.replace(/\/api\/?$/, '')
 function resolveAssetUrl(url) {
   if (!url) return ''
   if (/^(https?:|data:|blob:)/i.test(url)) return url
+  // URLs GridFS (/api/formations/files/:id) → préfixe API_BASE sans /api
+  if (url.startsWith('/api/')) return `${STATIC_BASE}${url}`
   return `${STATIC_BASE}${url.startsWith('/') ? '' : '/'}${url}`
 }
 async function uploadFormationFile(file, adminId) {
@@ -119,6 +121,18 @@ function TH({ children }) {
 // ─── Sections / Videos / Test editor ──────────────────────────────────────────
 function SectionsEditor({ sections, onChange, adminId }) {
   const list = Array.isArray(sections) ? sections : []
+  const [uploadingKey, setUploadingKey] = useState(null) // "sIdx-vIdx"
+
+  const uploadVideo = async (file, sIdx, vIdx) => {
+    const key = `${sIdx}-${vIdx}`
+    setUploadingKey(key)
+    try {
+      const data = await uploadFormationFile(file, adminId)
+      return data
+    } finally {
+      setUploadingKey(null)
+    }
+  }
 
   const update = (idx, patch) => {
     const next = list.map((s, i) => (i === idx ? { ...s, ...patch } : s))
@@ -269,17 +283,22 @@ function SectionsEditor({ sections, onChange, adminId }) {
                     value={video.url || ''}
                     onChange={(e) => updateVideo(sIdx, vIdx, { url: e.target.value })}
                   />
-                  <label className="col-span-4 flex cursor-pointer items-center justify-center gap-1 rounded-md border border-cyan-300 bg-cyan-50 px-2 py-1.5 text-xs font-semibold text-cyan-700 hover:bg-cyan-100">
-                    <span>📤 Uploader vidéo</span>
+                  <label className={`col-span-4 flex cursor-pointer items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-xs font-semibold transition-colors ${uploadingKey === `${sIdx}-${vIdx}` ? 'cursor-not-allowed border-amber-300 bg-amber-50 text-amber-700' : 'border-cyan-300 bg-cyan-50 text-cyan-700 hover:bg-cyan-100'}`}>
+                    {uploadingKey === `${sIdx}-${vIdx}` ? (
+                      <span>⏳ Envoi…</span>
+                    ) : (
+                      <span>📤 Uploader vidéo</span>
+                    )}
                     <input
                       type="file"
                       accept="video/*"
                       className="hidden"
+                      disabled={!!uploadingKey}
                       onChange={async (e) => {
                         const file = e.target.files?.[0]
-                        if (!file) return
+                        if (!file || uploadingKey) return
                         try {
-                          const data = await uploadFormationFile(file, adminId)
+                          const data = await uploadVideo(file, sIdx, vIdx)
                           updateVideo(sIdx, vIdx, { url: data.url, title: video.title || file.name.replace(/\.[^.]+$/, '') })
                         } catch (err) { alert(err.message) }
                         e.target.value = ''
@@ -287,8 +306,8 @@ function SectionsEditor({ sections, onChange, adminId }) {
                     />
                   </label>
                 </div>
-                {video.url && /^\/uploads\//.test(video.url) ? (
-                  <p className="truncate text-[10px] text-emerald-700">✓ Fichier local : {video.url}</p>
+                {video.url && /^\/(uploads|api)\//.test(video.url) ? (
+                  <p className="truncate text-[10px] text-emerald-700">✓ Fichier stocké : {video.url}</p>
                 ) : null}
               </div>
             ))}
