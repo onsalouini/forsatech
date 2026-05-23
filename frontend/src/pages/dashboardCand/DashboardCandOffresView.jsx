@@ -343,31 +343,6 @@ export function DashboardCandOffresView({
 									</div>
 								)}
 
-								{selectedJob.cvMatch && selectedJob.cvMatch.length > 0 && (
-									<div className='mt-6'>
-										<p className='text-[12px] font-black tracking-[0.12em] text-[#0d355b]'>MOTS-CLÉS VS VOTRE CV</p>
-										<div className='mt-3 space-y-2'>
-											{selectedJob.cvMatch.map(({ kw, ok }) => (
-												<div
-													key={kw}
-													className={`flex items-center gap-3 rounded-xl border px-3 py-2 ${ok ? 'border-emerald-200 bg-emerald-50' : 'border-rose-200 bg-rose-50'}`}
-												>
-													<span className='text-sm'>{ok ? '✅' : '❌'}</span>
-													<span className='flex-1 text-sm font-semibold text-slate-700'>{kw}</span>
-													<span className={`text-xs font-bold ${ok ? 'text-emerald-700' : 'text-rose-700'}`}>{ok ? 'Dans votre CV' : 'À ajouter'}</span>
-												</div>
-											))}
-										</div>
-
-										{selectedJob.cvMatch.some((m) => !m.ok) && (
-											<div className='mt-4 rounded-2xl border border-cyan-200 bg-cyan-50 p-4'>
-												<p className='text-sm font-semibold text-[#0a5f88]'>
-													Conseil: Ajoutez {selectedJob.cvMatch.filter((m) => !m.ok).map((m) => m.kw).join(', ')} à votre CV avant de postuler.
-												</p>
-											</div>
-										)}
-									</div>
-								)}
 							</div>
 						</div>
 					)}
