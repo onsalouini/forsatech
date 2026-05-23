@@ -307,7 +307,19 @@ function SectionsEditor({ sections, onChange, adminId }) {
                   </label>
                 </div>
                 {video.url && /^\/(uploads|api)\//.test(video.url) ? (
-                  <p className="truncate text-[10px] text-emerald-700">✓ Fichier stocké : {video.url}</p>
+                  <div className="mt-2 space-y-1">
+                    <p className="truncate text-[10px] font-semibold text-emerald-700">✓ Vidéo stockée dans MongoDB (GridFS)</p>
+                    <video
+                      src={resolveAssetUrl(video.url)}
+                      controls
+                      preload="metadata"
+                      className="w-full max-h-56 rounded-md border border-slate-200 bg-black"
+                    >
+                      Votre navigateur ne supporte pas la lecture vidéo.
+                    </video>
+                  </div>
+                ) : video.url && /^https?:\/\//i.test(video.url) ? (
+                  <p className="truncate text-[10px] text-cyan-700">🔗 URL externe : {video.url}</p>
                 ) : null}
               </div>
             ))}
