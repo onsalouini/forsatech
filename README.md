@@ -1,4 +1,4 @@
-# AIR - MERN Starter
+# ForsaTech - MERN Starter
 
 ## Structure
 
